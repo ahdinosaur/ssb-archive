@@ -1,0 +1,33 @@
+{
+  "name": "ssb-archive",
+  "version": "1.0.0",
+  "description": "archive your ssb profile",
+  "type": "module",
+  "module": "index.js",
+  "bin": "bin.js",
+  "scripts": {
+    "archive": "node ./bin.js --o output",
+    "server": "http-server output"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ahdinosaur/ssb-archive.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ahdinosaur/ssb-archive/issues"
+  },
+  "homepage": "https://github.com/ahdinosaur/ssb-archive#readme",
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.12",
+    "got": "^12.6.0",
+    "meow": "^11.0.0",
+    "mime-types": "^2.1.35",
+    "mkdirp": "^3.0.1"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}

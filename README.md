@@ -8,3 +8,12 @@ wget --mirror   --page-requisites --no-parent --html-extension --convert-links \
   --accept-regex ".*profile.*|.*blob.*|.*css.*|.*image.*" \
   http://localhost:3000/profile
 ```
+
+
+```shell
+wget -N -r -l 1 --no-remove-listing \
+  --page-requisites --no-parent --html-extension --convert-links \
+  -e robots=off --reject-regex ".*publish.*|.*public.*|.*mentions.*|.*search.*|.*imageSearch.*|.*settings.*|.*author.*|.*hashtag.*|.*subtopic.*|.*comment.*" \
+  --accept-regex "/profile/.*|/blob/.*|/css/.*|/image/.*|/thread/.*" \
+  http://localhost:3000/profile
+```
