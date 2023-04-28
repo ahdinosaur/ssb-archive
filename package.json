@@ -22,6 +22,7 @@
   "homepage": "https://github.com/ahdinosaur/ssb-archive#readme",
   "dependencies": {
     "cheerio": "^1.0.0-rc.12",
+    "file-type": "^18.3.0",
     "got": "^12.6.0",
     "meow": "^11.0.0",
     "mime-types": "^2.1.35",
