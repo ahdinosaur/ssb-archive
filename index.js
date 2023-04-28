@@ -48,14 +48,18 @@ async function downloadDoc(url, options, { depth = 0 } = {}) {
   const { outDir, host, visited, userIds } = options
 
   if (url == null) return null
-  url = url.split('#')[0]
+  const hasHash = url.includes('#')
+  let hash = ''
+  if (hasHash) {
+    [url, hash] = url.split('#')
+  }
 
   // skip
   if (
     !url.startsWith('/') ||
     url === '/theme.css'
   ) return url
-  if (visited.has(url)) return visited.get(url)
+  if (visited.has(url)) return visited.get(url) + hash
 
   const origUrl = url
 
@@ -109,7 +113,7 @@ async function downloadDoc(url, options, { depth = 0 } = {}) {
   await writeFile(path, doc)
 
   console.log(url)
-  return url
+  return url + hash
 }
 
 const MAX_DEPTH = Infinity
@@ -164,7 +168,7 @@ async function processHtml(doc, options, { depth }) {
   }
 
   for (const link of $('a')) {
-    if ($(link).text() === "Older posts") continue
+    // if ($(link).text() === "Older posts") continue
     const url = $(link).attr('href')
     if (!url.startsWith('/')) continue
     let newUrl
@@ -172,8 +176,16 @@ async function processHtml(doc, options, { depth }) {
       newUrl = await downloadDoc(url, options, { depth: depth + 1 })
     } else {
       let url = $(link).attr('href')
-      url = url.split('#')[0]
-      newUrl = visited.get(url) || '/404'
+      const hasHash = url.includes('#')
+      let hash = ''
+      if (hasHash) {
+        [url, hash] = url.split('#')
+      }
+      if (!visited.has(url)) {
+        newUrl = '/404'
+      } else {
+        visited.get(url) + hash
+      }
     }
     $(link).attr('href', newUrl)
   }
