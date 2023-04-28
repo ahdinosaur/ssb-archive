@@ -5,6 +5,8 @@ import { mkdirp } from 'mkdirp'
 import cheerio from 'cheerio'
 import Mime from 'mime-types'
 import { fileTypeFromBuffer } from 'file-type'
+import PQueue from 'p-queue'
+import QuickLRU from 'quick-lru'
 
 export async function archive(options = {}) {
   const { outDir, host } = options
@@ -14,13 +16,22 @@ export async function archive(options = {}) {
     '@SKIc/gO6Du10rTHqujjAP1+LHzVP441U2YsQeU+Up84=.ed25519',
     '@DUuG1ivTjZqtPYlDXHukLqsCDvjq5lkYmuZo+N4Oqc8=.ed25519',
   ]
-
-  const visited = new Map()
+  
+  const queue = new PQueue({
+    concurrency: 16,
+  })
+  const down = new QuickLRU({
+    maxSize: 1000
+  })
+  const done = new Set()
+  const urls = new Map()
 
   for (const userId of userIds) {
     const authorUrl = `/author/${encodeURIComponent(userId)}`
-    await downloadDoc(authorUrl, { outDir, host, visited, userIds })
+    await getDoc(authorUrl, { outDir, host, down, done, urls, userIds, queue })
   }
+
+  await queue.onIdle()
 
   const indexPage = `
     <html>
@@ -44,70 +55,23 @@ const processors = {
   html: processHtml,
 }
 
-async function downloadDoc(url, options, { depth = 0 } = {}) {
-  const { outDir, host, visited, userIds } = options
+async function getDoc(url, options, { depth = 0 } = {}) {
+  const { done } = options
 
-  if (url == null) return null
-  const hasHash = url.includes('#')
-  let hash = ''
-  if (hasHash) {
-    [url, hash] = url.split('#')
-  }
 
   // skip
   if (
     !url.startsWith('/') ||
     url === '/theme.css'
-  ) return url
-  if (visited.has(url)) return visited.get(url) + hash
+  ) return
 
-  const origUrl = url
+  const [urlWithoutHash] = url.split('#')
+  if (done.has(urlWithoutHash)) return
+  done.add(urlWithoutHash)
 
-  if (url.startsWith('/profile')) {
-    url = url.replace('/profile', `/author/${encodeURIComponent(userIds[0])}`)
-  }
-
-  let doc
-  try {
-    doc = await got(url.substring(1), {
-      prefixUrl: host,
-      retry: {
-        limit: 4,
-        backoffLimit: 5000,
-      }
-    })
-  } catch (err) {
-    console.error(err)
-    return '/404'
-  }
-
-  let ext
-  if (doc.headers['content-type']) {
-    ext = Mime.extension(doc.headers['content-type'])
-  } else {
-    const fileType = await fileTypeFromBuffer(doc.rawBody)
-    if (fileType != null) {
-      ext = fileType.ext
-    }
-  }
-
-  if (url.includes('?')) {
-    const [path, params] = url.split('?')
-    if (path.endsWith('/')) {
-      url = `${path}${params}`
-    } else {
-      url = `${path}/${params}`
-    }
-  }
-  let path = decodeURIComponent(url)
-  if (ext != null && !path.endsWith('.' + ext)) {
-    url = url + '.' + ext
-    path = path + '.' + ext
-  }
-  path = join(outDir, path)
-
-  visited.set(origUrl, url)
-
+  let doc = await downloadDoc(url, options)
+  if (doc == null) return
+  const { filePath, ext } = await processUrl(url, options)
   const processor = processors[ext]
   if (processor != null) {
     doc = await processor(doc.body, options, { depth })
@@ -115,17 +79,14 @@ async function downloadDoc(url, options, { depth = 0 } = {}) {
     doc = doc.rawBody
   }
 
-  await mkdirp(dirname(path))
-  await writeFile(path, doc)
-
-  console.log(url)
-  return url + hash
+  await mkdirp(dirname(filePath))
+  await writeFile(filePath, doc)
 }
 
-const MAX_DEPTH = Infinity
+const MAX_DEPTH = 1
 
 async function processHtml(doc, options, { depth }) {
-  const { visited } = options
+  const { queue } = options
 
   const $ = cheerio.load(doc)
 
@@ -155,44 +116,34 @@ async function processHtml(doc, options, { depth }) {
   // get page links
   for (const link of $('link')) {
     const url = $(link).attr('href')
-    await downloadDoc(url, options, { depth: depth + 1 })
+    queue.add(() => getDoc(url, options, { depth: depth + 1 }))
   }
 
   // get page images
   for (const img of $('img')) {
     const url = $(img).attr('src')
-    const newUrl = await downloadDoc(url, options, { depth: depth + 1 })
+    queue.add(() => getDoc(url, options, { depth: depth + 1 }))
+    const { url: newUrl } = await processUrl(url, options)
     $(img).attr('src', newUrl)
   }
 
   if (isPriorityProfile($, options)) {
     for (const link of $('a:contains("Older posts")')) {
       const url = $(link).attr('href')
-      const newUrl = await downloadDoc(url, options, { depth })
+      queue.add(() => getDoc(url, options, { depth }))
+      const { url: newUrl } = await processUrl(url, options)
       $(link).attr('href', newUrl)
     }
   }
 
   for (const link of $('a')) {
-    // if ($(link).text() === "Older posts") continue
+    if ($(link).text() === "Older posts") continue
     const url = $(link).attr('href')
     if (!url.startsWith('/')) continue
-    let newUrl
     if (depth < MAX_DEPTH) {
-      newUrl = await downloadDoc(url, options, { depth: depth + 1 })
-    } else {
-      let url = $(link).attr('href')
-      const hasHash = url.includes('#')
-      let hash = ''
-      if (hasHash) {
-        [url, hash] = url.split('#')
-      }
-      if (!visited.has(url)) {
-        newUrl = '/404'
-      } else {
-        visited.get(url) + hash
-      }
+      queue.add(() => getDoc(url, options, { depth: depth + 1 }))
     }
+    const { url: newUrl } = await processUrl(url, options)
     $(link).attr('href', newUrl)
   }
 
@@ -203,6 +154,97 @@ function isPriorityProfile($, options) {
   const { userIds } = options
   const profileId = $('pre.md-mention > .hljs-link').text()
   return userIds.includes(profileId)
+}
+
+async function processUrl(url, options) {
+  const { outDir, urls, userIds } = options
+
+  if (url == null) return null
+  if (!url.startsWith('/')) return { url }
+  if (urls.has(url)) return urls.get(url)
+
+  let urlPath, urlHash
+  if (url.includes('#')) {
+    const splits = url.split('#')
+    urlPath = splits[0]
+    urlHash = `#${splits[1]}`
+  } else {
+    urlPath = url
+    urlHash = ''
+  }
+
+  if (urlPath.startsWith('/profile')) {
+    urlPath = urlPath.replace('/profile', `/author/${encodeURIComponent(userIds[0])}`)
+  }
+
+  const doc = await downloadDoc(urlPath, options)
+
+  let ext
+  if (doc == null) {
+  } else if (doc.headers['content-type']) {
+    ext = Mime.extension(doc.headers['content-type'])
+  } else {
+    const fileType = await fileTypeFromBuffer(doc.rawBody)
+    if (fileType != null) {
+      ext = fileType.ext
+    }
+  }
+
+  if (urlPath.startsWith('/json')) {
+    urlPath = urlPath.replace('/json', '/message')
+  }
+
+
+  if (urlPath.includes('?')) {
+    const [filePath, params] = urlPath.split('?')
+    if (filePath.endsWith('/')) {
+      urlPath = `${filePath}${params}`
+    } else {
+      urlPath = `${filePath}/${params}`
+    }
+  }
+
+  let filePath = decodeURIComponent(urlPath)
+  if (ext != null && !filePath.endsWith('.' + ext)) {
+    urlPath = urlPath + '.' + ext
+    filePath = filePath + '.' + ext
+  }
+  filePath = join(outDir, filePath)
+
+  const result = {
+    url: urlPath + urlHash,
+    ext,
+    filePath,
+  }
+  urls.set(url, result)
+  return result
+}
+
+async function downloadDoc(url, options) {
+  const { down, host } = options
+
+  let [urlWithoutHash, hash] = url.split('#')
+
+  if (down.has(urlWithoutHash)) return down.get(urlWithoutHash)
+
+  console.log('download', urlWithoutHash)
+
+  let doc
+  try {
+    doc = await got(urlWithoutHash.substring(1), {
+      prefixUrl: host,
+      retry: {
+        limit: 4,
+        backoffLimit: 5000,
+      }
+    })
+  } catch (err) {
+    console.error(err)
+  }
+
+  down.set(urlWithoutHash, doc)
+
+  return doc
 }
 
 export default archive

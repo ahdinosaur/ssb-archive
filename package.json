@@ -26,7 +26,10 @@
     "got": "^12.6.0",
     "meow": "^11.0.0",
     "mime-types": "^2.1.35",
-    "mkdirp": "^3.0.1"
+    "mkdirp": "^3.0.1",
+    "p-all": "^5.0.0",
+    "p-queue": "^7.3.4",
+    "quick-lru": "^6.1.1"
   },
   "devDependencies": {
     "http-server": "^14.1.1"
