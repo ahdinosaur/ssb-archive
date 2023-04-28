@@ -112,7 +112,7 @@ async function downloadDoc(url, options, { depth = 0 } = {}) {
   return url
 }
 
-const MAX_DEPTH = 1
+const MAX_DEPTH = Infinity
 
 async function processHtml(doc, options, { depth }) {
   const { visited } = options
@@ -163,18 +163,19 @@ async function processHtml(doc, options, { depth }) {
     }
   }
 
-  if (depth < MAX_DEPTH) {
-    for (const link of $('a')) {
-      const url = $(link).attr('href')
-      const newUrl = await downloadDoc(url, options, { depth: depth + 1 })
-      $(link).attr('href', newUrl)
-    }
-  } else {
-    for (const link of $('a')) {
+  for (const link of $('a')) {
+    if ($(link).text() === "Older posts") continue
+    const url = $(link).attr('href')
+    if (!url.startsWith('/')) continue
+    let newUrl
+    if (depth < MAX_DEPTH) {
+      newUrl = await downloadDoc(url, options, { depth: depth + 1 })
+    } else {
       let url = $(link).attr('href')
       url = url.split('#')[0]
-      $(link).attr('href', visited.get(url) || '/404')
+      newUrl = visited.get(url) || '/404'
     }
+    $(link).attr('href', newUrl)
   }
 
   return $.html()
