@@ -69,7 +69,13 @@ async function downloadDoc(url, options, { depth = 0 } = {}) {
 
   let doc
   try {
-    doc = await got(url.substring(1), { prefixUrl: host })
+    doc = await got(url.substring(1), {
+      prefixUrl: host,
+      retry: {
+        limit: 4,
+        backoffLimit: 5000,
+      }
+    })
   } catch (err) {
     console.error(err)
     return '/404'

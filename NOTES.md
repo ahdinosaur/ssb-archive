@@ -1,0 +1,27 @@
+# TODO
+
+- topological search
+  - user -> threads -> posts -> blobs
+  - for each user, get threads
+  - for each thread, get posts
+  - for each post, get blobs
+- data
+  - user
+    - id
+    - name
+    - avatar
+      - full
+      - thumbnail
+    - description
+      - links
+  - thread
+    - rootId
+    - postsIds (sorted)
+  - post
+    - id
+    - text
+      - links
+  - blob
+    - id
+    - buffer
+  - link: user, post, blob
