@@ -76,6 +76,7 @@ pub fn create_abouts_views(connection: &Connection) -> Result<usize, Error> {
         keys_to.key as link_to_key, 
         authors_to.author as link_to_author,
         messages.content as content
+        messages.author as link_from_author,
         FROM abouts_raw 
         JOIN keys AS keys_from ON keys_from.id=abouts_raw.link_from_key_id
         JOIN messages ON link_from_key_id=messages.key_id

@@ -103,11 +103,13 @@ pub fn create_messages_views(connection: &Connection) -> Result<usize, Error> {
     )
 }
 
-pub fn create_messages_indices(connection: &Connection) -> Result<usize, Error> {
+pub fn create_messages_indices(connection: &Connection) -> Result<(), Error> {
     trace!("Creating messages indices");
     create_content_type_index(&connection)?;
     create_root_index(&connection)?;
-    create_author_index(connection)
+    create_fork_index(&connection)?;
+    create_author_index(connection)?;
+    Ok(())
 }
 
 fn create_author_index(connection: &Connection) -> Result<usize, Error> {
@@ -122,6 +124,14 @@ fn create_root_index(connection: &Connection) -> Result<usize, Error> {
     trace!("Creating root index");
     connection.execute(
         "CREATE INDEX IF NOT EXISTS root_id_index on messages_raw (root_id)",
+        (),
+    )
+}
+
+fn create_fork_index(connection: &Connection) -> Result<usize, Error> {
+    trace!("Creating root index");
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS fork_id_index on messages_raw (fork_id)",
         (),
     )
 }
