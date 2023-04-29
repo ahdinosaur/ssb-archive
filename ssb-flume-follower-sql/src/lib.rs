@@ -1,6 +1,6 @@
-use flumedb::BidirIterator;
-use flumedb::OffsetLogIter;
-use flumedb::Sequence;
+use std::fs::OpenOptions;
+
+use flumedb::{BidirIterator, FlumeLog, OffsetLog, OffsetLogIter, Sequence};
 
 use itertools::Itertools;
 use private_box::Keypair;
@@ -26,12 +26,23 @@ impl SsbQuery {
         Ok(SsbQuery { view, log_path })
     }
 
-    pub fn get_latest(&self) -> Sequence {
+    pub fn get_log_latest(&self) -> Option<Sequence> {
+        let log_file = OpenOptions::new()
+            .read(true)
+            .write(false)
+            .create(false)
+            .open(&self.log_path)
+            .unwrap();
+        let log = OffsetLog::<u32>::from_file(log_file).unwrap();
+        log.latest()
+    }
+
+    pub fn get_view_latest(&self) -> Sequence {
         self.view.get_latest().unwrap()
     }
 
     pub fn process(&mut self, num_items: i64) {
-        let latest = self.get_latest();
+        let latest = self.get_view_latest();
 
         //If the latest is 0, we haven't got anything in the db. Don't skip the very first
         //element in the offset log. I know this isn't super nice. It could be refactored later.
@@ -39,15 +50,19 @@ impl SsbQuery {
             0 => 0,
             _ => 1,
         };
-        let log_path = self.log_path.clone();
-        let file = std::fs::File::open(log_path.clone()).unwrap();
+        let log_file = OpenOptions::new()
+            .read(true)
+            .write(false)
+            .create(false)
+            .open(&self.log_path)
+            .unwrap();
 
         let items_to_take = match num_items {
             -1 => std::usize::MAX,
             n => n as usize,
         };
 
-        OffsetLogIter::<u32>::with_starting_offset(file, latest)
+        OffsetLogIter::<u32>::with_starting_offset(log_file, latest)
             .forward()
             .skip(num_to_skip)
             .take(items_to_take)
@@ -55,7 +70,9 @@ impl SsbQuery {
             .chunks(1000)
             .into_iter()
             .for_each(|chunk| {
-                self.view.append_batch(&chunk.collect_vec());
+                let vec = chunk.collect_vec();
+                println!("chunk: {:?}", &vec);
+                self.view.append_batch(&vec);
             })
     }
 }
