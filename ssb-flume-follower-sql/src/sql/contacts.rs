@@ -1,5 +1,5 @@
 use log::trace;
-use rusqlite::{Connection, Error, NO_PARAMS};
+use rusqlite::{Connection, Error};
 use serde_json::Value;
 
 use crate::sql::*;
@@ -16,7 +16,7 @@ pub fn create_contacts_tables(connection: &Connection) -> Result<usize, Error> {
         state INTEGER
     ) 
     ",
-        NO_PARAMS,
+        (),
     )
 }
 
@@ -76,10 +76,10 @@ fn create_contacts_author_id_state_index(conn: &Connection) -> Result<usize, Err
     trace!("Creating contacts author_id index");
     conn.execute(
         "CREATE INDEX IF NOT EXISTS contacts_raw_contact_author_id_state_index on contacts_raw (contact_author_id)",
-        NO_PARAMS,
+        (),
     )?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS contacts_raw_author_id_state_index on contacts_raw (author_id, state)",
-        NO_PARAMS,
+        (),
     )
 }

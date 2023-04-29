@@ -1,5 +1,5 @@
 use log::trace;
-use rusqlite::{Connection, Error, NO_PARAMS};
+use rusqlite::{Connection, Error};
 
 use crate::sql::*;
 
@@ -12,7 +12,7 @@ pub fn create_mentions_tables(connection: &Connection) -> Result<usize, Error> {
           link_from_key_id INTEGER,
           link_to_author_id INTEGER
         )",
-        NO_PARAMS,
+        (),
     )
 }
 
@@ -52,7 +52,7 @@ pub fn create_mentions_views(connection: &Connection) -> Result<usize, Error> {
         JOIN authors ON authors.id = mentions_raw.link_to_author_id
         JOIN messages_raw ON messages_raw.key_id = mentions_raw.link_from_key_id
         ",
-        NO_PARAMS,
+        (),
     )
 }
 pub fn create_mentions_indices(connection: &Connection) -> Result<usize, Error> {
@@ -63,10 +63,10 @@ fn create_mentions_to_index(conn: &Connection) -> Result<usize, Error> {
     trace!("Creating mentions index");
     conn.execute(
         "CREATE INDEX IF NOT EXISTS mentions_id_to_index on mentions_raw (link_to_author_id, link_from_key_id)",
-        NO_PARAMS,
+        (),
     )?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS mentions_id_from_index on mentions_raw (link_from_key_id, link_to_author_id)",
-        NO_PARAMS,
+        (),
     )
 }

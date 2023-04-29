@@ -1,5 +1,5 @@
 use log::trace;
-use rusqlite::{Connection, Error, NO_PARAMS};
+use rusqlite::{Connection, Error};
 
 pub fn find_or_create_key(connection: &Connection, key: &str) -> Result<i64, Error> {
     let mut stmt = connection.prepare_cached("SELECT id FROM keys WHERE key=?1")?;
@@ -19,7 +19,7 @@ pub fn create_keys_tables(connection: &Connection) -> Result<usize, Error> {
           id INTEGER PRIMARY KEY,
           key TEXT UNIQUE
         )",
-        NO_PARAMS,
+        (),
     )
 }
 

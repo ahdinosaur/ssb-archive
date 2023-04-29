@@ -1,5 +1,5 @@
 use log::trace;
-use rusqlite::{Connection, Error, NO_PARAMS};
+use rusqlite::{Connection, Error};
 use serde_json::Value;
 
 use crate::sql::*;
@@ -41,7 +41,7 @@ pub fn create_branches_tables(connection: &Connection) -> Result<usize, Error> {
           link_from_key_id INTEGER,
           link_to_key_id INTEGER
         )",
-        NO_PARAMS,
+        (),
     )
 }
 

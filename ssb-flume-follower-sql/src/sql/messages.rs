@@ -1,6 +1,6 @@
 use log::trace;
 use rusqlite::types::ToSql;
-use rusqlite::{Connection, Error, NO_PARAMS};
+use rusqlite::{Connection, Error};
 use serde_json::Value;
 
 use crate::sql::*;
@@ -68,7 +68,7 @@ pub fn create_messages_tables(connection: &Connection) -> Result<usize, Error> {
           content JSON,
           is_decrypted BOOLEAN
         )",
-        NO_PARAMS,
+        (),
     )
 }
 
@@ -99,7 +99,7 @@ pub fn create_messages_views(connection: &Connection) -> Result<usize, Error> {
         LEFT JOIN keys AS fork_keys ON fork_keys.id=messages_raw.fork_id
         JOIN authors ON authors.id=messages_raw.author_id
         ",
-        NO_PARAMS,
+        (),
     )
 }
 
@@ -114,7 +114,7 @@ fn create_author_index(connection: &Connection) -> Result<usize, Error> {
     trace!("Creating author index");
     connection.execute(
         "CREATE INDEX IF NOT EXISTS author_id_index on messages_raw (author_id)",
-        NO_PARAMS,
+        (),
     )
 }
 
@@ -122,7 +122,7 @@ fn create_root_index(connection: &Connection) -> Result<usize, Error> {
     trace!("Creating root index");
     connection.execute(
         "CREATE INDEX IF NOT EXISTS root_id_index on messages_raw (root_id)",
-        NO_PARAMS,
+        (),
     )
 }
 
@@ -130,6 +130,6 @@ fn create_content_type_index(connection: &Connection) -> Result<usize, Error> {
     trace!("Creating content type index");
     connection.execute(
         "CREATE INDEX IF NOT EXISTS content_type_index on messages_raw (content_type)",
-        NO_PARAMS,
+        (),
     )
 }

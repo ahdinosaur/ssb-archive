@@ -1,5 +1,5 @@
 use log::trace;
-use rusqlite::{Connection, Error, NO_PARAMS};
+use rusqlite::{Connection, Error};
 
 pub fn find_or_create_author(connection: &Connection, author: &str) -> Result<i64, Error> {
     let mut stmt = connection.prepare_cached("SELECT id FROM authors WHERE author=?1")?;
@@ -20,7 +20,7 @@ pub fn create_authors_tables(connection: &Connection) -> Result<usize, Error> {
           author TEXT UNIQUE,
           is_me BOOLEAN 
         )",
-        NO_PARAMS,
+        (),
     )
 }
 
@@ -37,6 +37,6 @@ fn create_is_me_index(connection: &Connection) -> Result<usize, Error> {
     trace!("Creating is_me index");
     connection.execute(
         "CREATE INDEX IF NOT EXISTS authors_is_me_index ON authors (is_me)",
-        NO_PARAMS,
+        (),
     )
 }

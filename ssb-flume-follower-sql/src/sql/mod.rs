@@ -1,14 +1,12 @@
-use base64::decode;
-use failure::Error;
-use failure_derive::Fail;
+use base64::engine::{general_purpose::STANDARD as b64, Engine};
 use flumedb::flume_view::{FlumeView, Sequence};
 use log::{info, trace};
-use private_box::SecretKey;
+use private_box::Keypair;
 use rusqlite::types::ToSql;
-use rusqlite::OpenFlags;
-use rusqlite::{Connection, NO_PARAMS};
+use rusqlite::{Connection, Error as SqlError, OpenFlags};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
+use thiserror::Error as ThisError;
 
 mod abouts;
 mod authors;
@@ -51,15 +49,17 @@ pub struct SsbMessage {
     timestamp: f64,
 }
 
-#[derive(Debug, Fail)]
+#[derive(Debug, ThisError)]
 pub enum FlumeViewSqlError {
-    #[fail(display = "Db failed integrity check")]
+    #[error("Db failed integrity check")]
     DbFailedIntegrityCheck {},
+    #[error("Sql error")]
+    Sql(#[from] SqlError),
 }
 
 pub struct FlumeViewSql {
     pub connection: Connection,
-    secret_keys: Vec<SecretKey>,
+    secret_keys: Vec<Keypair>,
 }
 
 impl FlumeView for FlumeViewSql {
@@ -71,20 +71,20 @@ impl FlumeView for FlumeViewSql {
     }
 }
 
-fn create_connection(path: &str) -> Result<Connection, Error> {
+fn create_connection(path: &str) -> Result<Connection, SqlError> {
     let flags: OpenFlags = OpenFlags::SQLITE_OPEN_READ_WRITE
         | OpenFlags::SQLITE_OPEN_CREATE
         | OpenFlags::SQLITE_OPEN_NO_MUTEX;
 
-    Connection::open_with_flags(path, flags).map_err(|err| err.into())
+    Connection::open_with_flags(path, flags)
 }
 
 impl FlumeViewSql {
     pub fn new(
         path: &str,
-        secret_keys: Vec<SecretKey>,
+        secret_keys: Vec<Keypair>,
         pub_key: &str,
-    ) -> Result<FlumeViewSql, Error> {
+    ) -> Result<FlumeViewSql, FlumeViewSqlError> {
         let mut connection = create_connection(path)?;
 
         if let Ok(false) = is_db_up_to_date(&connection) {
@@ -109,16 +109,15 @@ impl FlumeViewSql {
         })
     }
 
-    pub fn get_seq_by_key(&mut self, key: &str) -> Result<i64, Error> {
+    pub fn get_seq_by_key(&mut self, key: &str) -> Result<i64, FlumeViewSqlError> {
         let mut stmt = self
             .connection
             .prepare("SELECT flume_seq FROM messages_raw JOIN keys ON messages_raw.key_id=keys.id WHERE keys.key=?1")?;
 
-        stmt.query_row(&[key], |row| row.get(0))
-            .map_err(|err| err.into())
+        Ok(stmt.query_row(&[key], |row| Ok(row.get(0)?))?)
     }
 
-    pub fn get_seqs_by_type(&mut self, content_type: &str) -> Result<Vec<i64>, Error> {
+    pub fn get_seqs_by_type(&mut self, content_type: &str) -> Result<Vec<i64>, FlumeViewSqlError> {
         let mut stmt = self
             .connection
             .prepare("SELECT flume_seq FROM messages_raw WHERE content_type=?1")?;
@@ -133,7 +132,7 @@ impl FlumeViewSql {
         Ok(seqs)
     }
 
-    pub fn get_seqs_by_author(&mut self, author: &str) -> Result<Vec<i64>, Error> {
+    pub fn get_seqs_by_author(&mut self, author: &str) -> Result<Vec<i64>, FlumeViewSqlError> {
         let mut stmt = self
             .connection
             .prepare("SELECT flume_seq FROM messages_raw JOIN authors ON messages_raw.author_id=authors.id WHERE author=?1")?;
@@ -159,10 +158,10 @@ impl FlumeViewSql {
         tx.commit().unwrap();
     }
 
-    pub fn check_db_integrity(&mut self) -> Result<(), Error> {
+    pub fn check_db_integrity(&mut self) -> Result<(), FlumeViewSqlError> {
         self.connection
-            .query_row_and_then("PRAGMA integrity_check", NO_PARAMS, |row| {
-                row.get_checked(0)
+            .query_row_and_then("PRAGMA integrity_check", (), |row| {
+                row.get(0)
                     .map_err(|err| err.into())
                     .and_then(|res: String| {
                         if res == "ok" {
@@ -173,15 +172,15 @@ impl FlumeViewSql {
             })
     }
 
-    pub fn get_latest(&self) -> Result<Sequence, Error> {
+    pub fn get_latest(&self) -> Result<Sequence, FlumeViewSqlError> {
         let mut stmt = self
             .connection
             .prepare_cached("SELECT MAX(flume_seq) FROM messages_raw")?;
 
-        stmt.query_row(NO_PARAMS, |row| {
-            let res: i64 = row.get_checked(0).unwrap_or(0);
+        stmt.query_row((), |row| {
+            let res: i64 = row.get(0).unwrap_or(0);
             trace!("got latest seq from db: {}", res);
-            res as Sequence
+            Ok(res as Sequence)
         })
         .map_err(|err| err.into())
     }
@@ -215,21 +214,21 @@ fn find_values_in_object_by_key<'a>(
     }
 }
 
-fn attempt_decryption(mut message: SsbMessage, secret_keys: &[SecretKey]) -> (bool, SsbMessage) {
+fn attempt_decryption(mut message: SsbMessage, secret_keys: &[Keypair]) -> (bool, SsbMessage) {
     let mut is_decrypted = false;
 
     message = match message.value.content["type"] {
         Value::Null => {
             let content = message.value.content.clone();
-            let strrr = &content.as_str().unwrap().trim_end_matches(".box");
+            let string = &content.as_str().unwrap().trim_end_matches(".box");
 
-            let bytes = decode(strrr).unwrap();
+            let bytes = b64.decode(string).unwrap();
 
             for secret_key in secret_keys {
                 message.value.content = private_box::decrypt(&bytes, secret_key)
                     .and_then(|data| {
                         is_decrypted = true;
-                        serde_json::from_slice(&data).map_err(|_| ())
+                        serde_json::from_slice(&data).ok()
                     })
                     .unwrap_or(Value::Null); //If we can't decrypt it, throw it away.
 
@@ -248,10 +247,10 @@ fn attempt_decryption(mut message: SsbMessage, secret_keys: &[SecretKey]) -> (bo
 
 fn append_item(
     connection: &Connection,
-    secret_keys: &[SecretKey],
+    secret_keys: &[Keypair],
     seq: Sequence,
     item: &[u8],
-) -> Result<(), Error> {
+) -> Result<(), SqlError> {
     let message: SsbMessage = serde_json::from_slice(item).unwrap();
 
     let (is_decrypted, message) = attempt_decryption(message, secret_keys);
@@ -287,15 +286,11 @@ fn append_item(
 }
 
 fn set_pragmas(connection: &Connection) {
-    connection
-        .execute("PRAGMA synchronous = OFF", NO_PARAMS)
-        .unwrap();
-    connection
-        .execute("PRAGMA page_size = 4096", NO_PARAMS)
-        .unwrap();
+    connection.execute("PRAGMA synchronous = OFF", ()).unwrap();
+    connection.execute("PRAGMA page_size = 4096", ()).unwrap();
 }
 
-fn create_tables(connection: &Connection) -> Result<(), Error> {
+fn create_tables(connection: &Connection) -> Result<(), SqlError> {
     create_migrations_tables(connection)?;
     create_messages_tables(connection)?;
     create_authors_tables(connection)?;
@@ -312,7 +307,7 @@ fn create_tables(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-fn create_views(connection: &Connection) -> Result<(), Error> {
+fn create_views(connection: &Connection) -> Result<(), SqlError> {
     create_messages_views(connection)?;
     create_links_views(connection)?;
     create_blob_links_views(connection)?;
@@ -322,7 +317,7 @@ fn create_views(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-fn create_indices(connection: &Connection) -> Result<(), Error> {
+fn create_indices(connection: &Connection) -> Result<(), SqlError> {
     create_messages_indices(connection)?;
     create_links_indices(connection)?;
     create_blob_links_indices(connection)?;

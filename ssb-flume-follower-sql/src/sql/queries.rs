@@ -30,10 +30,12 @@ pub fn back_link_references(
 ",
     )?;
 
-    let rows = stmt.query_map(&[&id, &id], |row| BackLink {
-        id: row.get::<usize, String>(0),
-        author: row.get::<usize, String>(1),
-        timestamp: row.get::<usize, f64>(2),
+    let rows = stmt.query_map(&[&id, &id], |row| {
+        Ok(BackLink {
+            id: row.get::<usize, String>(0)?,
+            author: row.get::<usize, String>(1)?,
+            timestamp: row.get::<usize, f64>(2)?,
+        })
     })?;
 
     rows.collect()

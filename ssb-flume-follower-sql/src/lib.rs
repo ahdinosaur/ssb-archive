@@ -1,30 +1,13 @@
-extern crate failure;
-extern crate failure_derive;
-
-extern crate log;
-
-extern crate itertools;
-
-extern crate serde;
-extern crate serde_derive;
-extern crate serde_json;
-
-extern crate base64;
-extern crate flumedb;
-extern crate private_box;
-extern crate rusqlite;
-
-use failure::Error;
-
 use flumedb::BidirIterator;
 use flumedb::OffsetLogIter;
 use flumedb::Sequence;
 
 use itertools::Itertools;
-use private_box::SecretKey;
+use private_box::Keypair;
 
 pub mod sql;
 pub use sql::FlumeViewSql;
+use sql::FlumeViewSqlError;
 
 pub struct SsbQuery {
     view: FlumeViewSql,
@@ -35,9 +18,9 @@ impl SsbQuery {
     pub fn new(
         log_path: String,
         view_path: String,
-        keys: Vec<SecretKey>,
+        keys: Vec<Keypair>,
         pub_key: &str,
-    ) -> Result<SsbQuery, Error> {
+    ) -> Result<SsbQuery, FlumeViewSqlError> {
         let view = FlumeViewSql::new(&view_path, keys, pub_key)?;
 
         Ok(SsbQuery { view, log_path })

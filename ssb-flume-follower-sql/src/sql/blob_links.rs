@@ -1,5 +1,5 @@
 use log::trace;
-use rusqlite::{Connection, Error, NO_PARAMS};
+use rusqlite::{Connection, Error};
 
 use crate::sql::*;
 
@@ -12,7 +12,7 @@ pub fn create_blob_links_tables(connection: &Connection) -> Result<usize, Error>
           link_from_key_id INTEGER,
           link_to_blob_id INTEGER
         )",
-        NO_PARAMS,
+        (),
     )
 }
 
@@ -30,7 +30,7 @@ pub fn create_blob_links_views(connection: &Connection) -> Result<usize, Error> 
         JOIN keys ON keys.id=blob_links_raw.link_from_key_id
         JOIN blobs ON blobs.id=blob_links_raw.link_to_blob_id
         ",
-        NO_PARAMS,
+        (),
     )
 }
 
@@ -66,10 +66,10 @@ fn create_blob_links_index(conn: &Connection) -> Result<usize, Error> {
     trace!("Creating blob links index");
     conn.execute(
         "CREATE INDEX IF NOT EXISTS blob_links_index_to on blob_links_raw (link_to_blob_id)",
-        NO_PARAMS,
+        (),
     )?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS blob_links_index_from on blob_links_raw (link_from_key_id)",
-        NO_PARAMS,
+        (),
     )
 }

@@ -1,5 +1,5 @@
 use log::trace;
-use rusqlite::{Connection, Error, NO_PARAMS};
+use rusqlite::{Connection, Error};
 
 use crate::sql::*;
 
@@ -12,7 +12,7 @@ pub fn create_votes_tables(connection: &Connection) -> Result<usize, Error> {
           link_from_author_id INTEGER,
           link_to_key_id INTEGER
         )",
-        NO_PARAMS,
+        (),
     )
 }
 
@@ -45,10 +45,10 @@ pub fn create_votes_indices(connection: &Connection) -> Result<usize, Error> {
     trace!("Creating votes indices");
     connection.execute(
         "CREATE INDEX IF NOT EXISTS votes_raw_link_from_author_id_index on votes_raw (link_from_author_id)",
-        NO_PARAMS,
+        (),
     )?;
     connection.execute(
         "CREATE INDEX IF NOT EXISTS votes_raw_link_to_key_id_index on votes_raw (link_to_key_id)",
-        NO_PARAMS,
+        (),
     )
 }

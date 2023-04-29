@@ -1,6 +1,6 @@
 use log::trace;
 use rusqlite::types::Null;
-use rusqlite::{Connection, Error, NO_PARAMS};
+use rusqlite::{Connection, Error};
 
 use crate::sql::*;
 
@@ -14,7 +14,7 @@ pub fn create_abouts_tables(connection: &Connection) -> Result<usize, Error> {
           link_to_author_id INTEGER,
           link_to_key_id INTEGER
         )",
-        NO_PARAMS,
+        (),
     )
 }
 
@@ -49,15 +49,15 @@ pub fn create_abouts_indices(connection: &Connection) -> Result<usize, Error> {
     trace!("Creating abouts index");
     connection.execute(
         "CREATE INDEX IF NOT EXISTS abouts_raw_from_index on abouts_raw (link_from_key_id)",
-        NO_PARAMS,
+        (),
     )?;
     connection.execute(
         "CREATE INDEX IF NOT EXISTS abouts_raw_key_index on abouts_raw (link_to_key_id)",
-        NO_PARAMS,
+        (),
     )?;
     connection.execute(
         "CREATE INDEX IF NOT EXISTS abouts_raw_author_index on abouts_raw (link_to_author_id )",
-        NO_PARAMS,
+        (),
     )
 }
 
@@ -82,6 +82,6 @@ pub fn create_abouts_views(connection: &Connection) -> Result<usize, Error> {
         LEFT JOIN keys AS keys_to ON keys_to.id=abouts_raw.link_to_key_id
         LEFT JOIN authors AS authors_to ON authors_to.id=abouts_raw.link_to_author_id
         ",
-        NO_PARAMS,
+        (),
     )
 }
