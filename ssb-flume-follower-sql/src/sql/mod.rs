@@ -67,7 +67,7 @@ impl FlumeView for FlumeViewSql {
         append_item(&self.connection, &self.secret_keys, seq, item).unwrap()
     }
     fn latest(&self) -> Sequence {
-        self.get_latest().unwrap()
+        self.get_latest().unwrap().unwrap_or(0)
     }
 }
 
@@ -172,17 +172,16 @@ impl FlumeViewSql {
             })
     }
 
-    pub fn get_latest(&self) -> Result<Sequence, FlumeViewSqlError> {
+    pub fn get_latest(&self) -> Result<Option<Sequence>, FlumeViewSqlError> {
         let mut stmt = self
             .connection
             .prepare_cached("SELECT MAX(flume_seq) FROM messages_raw")?;
 
-        stmt.query_row((), |row| {
-            let res: i64 = row.get(0).unwrap_or(0);
-            trace!("got latest seq from db: {}", res);
-            Ok(res as Sequence)
-        })
-        .map_err(|err| err.into())
+        Ok(stmt.query_row((), |row| {
+            let res: Option<i64> = row.get(0).ok();
+            trace!("got latest seq from db: {:?}", res);
+            Ok(res.map(|v| v as Sequence))
+        })?)
     }
 }
 
@@ -220,20 +219,23 @@ fn attempt_decryption(mut message: SsbMessage, secret_keys: &[Keypair]) -> (bool
     message = match message.value.content["type"] {
         Value::Null => {
             let content = message.value.content.clone();
-            let string = &content.as_str().unwrap().trim_end_matches(".box");
+            let string = &content.as_str().unwrap();
 
-            let bytes = b64.decode(string).unwrap();
+            let string = string.trim_end_matches(".box");
 
-            for secret_key in secret_keys {
-                message.value.content = private_box::decrypt(&bytes, secret_key)
-                    .and_then(|data| {
-                        is_decrypted = true;
-                        serde_json::from_slice(&data).ok()
-                    })
-                    .unwrap_or(Value::Null); //If we can't decrypt it, throw it away.
+            let decoded = b64.decode(string);
+            if let Ok(bytes) = decoded {
+                for secret_key in secret_keys {
+                    message.value.content = private_box::decrypt(&bytes, secret_key)
+                        .and_then(|data| {
+                            is_decrypted = true;
+                            serde_json::from_slice(&data).ok()
+                        })
+                        .unwrap_or(Value::Null); //If we can't decrypt it, throw it away.
 
-                if is_decrypted {
-                    break;
+                    if is_decrypted {
+                        break;
+                    }
                 }
             }
 
