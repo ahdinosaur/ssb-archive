@@ -4,7 +4,6 @@ import got from 'got'
 import { mkdirp } from 'mkdirp'
 import cheerio from 'cheerio'
 import Mime from 'mime-types'
-import { fileTypeFromBuffer } from 'file-type'
 import PQueue from 'p-queue'
 import QuickLRU from 'quick-lru'
 
@@ -83,7 +82,7 @@ async function getDoc(url, options, { depth = 0 } = {}) {
   await writeFile(filePath, doc)
 }
 
-const MAX_DEPTH = 1
+const MAX_DEPTH = Infinity
 
 async function processHtml(doc, options, { depth }) {
   const { queue } = options
@@ -127,6 +126,15 @@ async function processHtml(doc, options, { depth }) {
     $(img).attr('src', newUrl)
   }
 
+  // get page images
+  for (const img of $('img')) {
+    const url = $(img).attr('src')
+    queue.add(() => getDoc(url, options, { depth: depth + 1 }))
+    const { url: newUrl } = await processUrl(url, options)
+    $(img).attr('src', newUrl)
+  }
+
+  /*
   if (isPriorityProfile($, options)) {
     for (const link of $('a:contains("Older posts")')) {
       const url = $(link).attr('href')
@@ -135,9 +143,10 @@ async function processHtml(doc, options, { depth }) {
       $(link).attr('href', newUrl)
     }
   }
+  */
 
   for (const link of $('a')) {
-    if ($(link).text() === "Older posts") continue
+    // if ($(link).text() === "Older posts") continue
     const url = $(link).attr('href')
     if (!url.startsWith('/')) continue
     if (depth < MAX_DEPTH) {
@@ -177,23 +186,27 @@ async function processUrl(url, options) {
     urlPath = urlPath.replace('/profile', `/author/${encodeURIComponent(userIds[0])}`)
   }
 
-  const doc = await downloadDoc(urlPath, options)
-
   let ext
-  if (doc == null) {
-  } else if (doc.headers['content-type']) {
-    ext = Mime.extension(doc.headers['content-type'])
-  } else {
-    const fileType = await fileTypeFromBuffer(doc.rawBody)
-    if (fileType != null) {
-      ext = fileType.ext
-    }
-  }
-
   if (urlPath.startsWith('/json')) {
     urlPath = urlPath.replace('/json', '/message')
+    ext = 'json'
+  } else if (
+    urlPath.startsWith('/author') ||
+    urlPath.startsWith('/thread') ||
+    urlPath.startsWith('/hashtag') ||
+    urlPath.startsWith('/likes') ||
+    urlPath.startsWith('/subtopic')
+  ) {
+    ext = 'html'
+  } else if (urlPath.startsWith('/image')) {
+    ext = 'png'
   }
-
+  if (ext == null) {
+    const doc = await downloadDoc(url, options)
+    if (doc != null && doc.headers['content-type']) {
+      ext = Mime.extension(doc.headers['content-type'])
+    }
+  }
 
   if (urlPath.includes('?')) {
     const [filePath, params] = urlPath.split('?')
