@@ -33,7 +33,7 @@ use self::mentions::*;
 use self::messages::*;
 use self::migrations::*;
 pub use self::queries::SelectAllMessagesByFeedOptions;
-use self::queries::*;
+pub(crate) use self::queries::*;
 use self::votes::*;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -184,17 +184,6 @@ impl SqlView {
             trace!("got latest seq from db: {:?}", res);
             Ok(res.map(|v| v as Sequence))
         })?)
-    }
-
-    pub fn select_all_messages_by_feed(
-        &self,
-        options: SelectAllMessagesByFeedOptions,
-    ) -> Result<Vec<SsbMessage>, SqlViewError> {
-        Ok(select_all_messages_by_feed(&self.connection, options)?)
-    }
-
-    pub fn select_max_seq_by_feed(&self, feed_id: &str) -> Result<i64, SqlViewError> {
-        Ok(select_max_seq_by_feed(&self.connection, feed_id)?)
     }
 }
 

@@ -8,6 +8,7 @@ use private_box::Keypair;
 pub mod sql;
 pub use sql::SelectAllMessagesByFeedOptions;
 use sql::SqlViewError;
+use sql::{select_all_messages_by_feed, select_max_seq_by_feed};
 pub use sql::{SqlView, SsbMessage, SsbValue};
 
 pub struct SsbQuery {
@@ -71,10 +72,10 @@ impl SsbQuery {
         &self,
         options: SelectAllMessagesByFeedOptions,
     ) -> Result<Vec<SsbMessage>, SqlViewError> {
-        Ok(self.view.select_all_messages_by_feed(options)?)
+        Ok(select_all_messages_by_feed(&self.view.connection, options)?)
     }
 
     pub fn select_max_seq_by_feed(&self, feed_id: &str) -> Result<i64, SqlViewError> {
-        Ok(self.view.select_max_seq_by_feed(feed_id)?)
+        Ok(select_max_seq_by_feed(&self.view.connection, feed_id)?)
     }
 }

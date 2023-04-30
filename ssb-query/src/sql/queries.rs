@@ -104,6 +104,7 @@ WHERE
 LIMIT 10
 */
 
+/*
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BackLink {
     id: String,
@@ -118,14 +119,14 @@ pub fn back_link_references(
 ) -> Result<Vec<BackLink>, Error> {
     let mut stmt = connection.prepare_cached(
         "
-        SELECT  
+        SELECT
             links.link_from_key as id,
             messages.author as author,
             messages.received_time as timestamp
-        FROM links 
-        JOIN messages ON messages.key = links.link_from_key 
+        FROM links
+        JOIN messages ON messages.key = links.link_from_key
         WHERE link_to_key = ?
-        AND NOT root = ? 
+        AND NOT root = ?
         AND NOT content_type = 'about'
         AND NOT content_type = 'vote'
         AND NOT content_type = 'tag'
@@ -217,3 +218,4 @@ mod test {
         view
     }
 }
+*/

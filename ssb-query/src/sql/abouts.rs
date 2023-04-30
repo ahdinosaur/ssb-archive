@@ -20,7 +20,7 @@ pub fn create_abouts_tables(connection: &Connection) -> Result<usize, Error> {
 
 pub fn insert_abouts(connection: &Connection, message: &SsbMessage, message_key_id: i64) {
     if let Value::String(about_key) = &message.value.content["about"] {
-        let mut key;
+        let key;
 
         let (link_to_author_id, link_to_key_id): (&dyn ToSql, &dyn ToSql) =
             match about_key.get(0..1) {
