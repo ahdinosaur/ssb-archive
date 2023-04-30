@@ -1,5 +1,7 @@
 [workspace]
 members = [
   "ssb-archive",
-  "ssb-flume-follower-sql"
+  "ssb-flume-follower-sql",
+  "ssb-markdown",
+  "ssb-ref"
 ]
