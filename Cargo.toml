@@ -3,5 +3,6 @@ members = [
   "ssb-archive",
   "ssb-query",
   "ssb-markdown",
-  "ssb-ref"
+  "ssb-ref",
+  "ssb-pages"
 ]
