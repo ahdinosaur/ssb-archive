@@ -87,55 +87,66 @@ pub fn to_html(parser: Map<Parser, impl FnMut(Event) -> Event>) -> String {
 
 pub fn linkify(text: &str) -> impl Iterator<Item = Event> {
     let mut parents: Vec<Tag> = Vec::new();
-    let mut events: Vec<Event> = Vec::new();
-    let parser = Parser::new(text).map(|event| match event {
+    Parser::new(text).flat_map(move |event| match event {
         Event::Start(tag) => {
             println!("Start: {:?} (Parents: {:?})", tag, parents);
             parents.push(tag.clone());
-            events.push(Event::Start(tag));
+            vec![Event::Start(tag)].into_iter()
         }
         Event::End(tag) => {
             println!("End: {:?} (Parents: {:?})", tag, parents);
             parents.pop();
-            events.push(Event::End(tag));
+            vec![Event::End(tag)].into_iter()
         }
         Event::Text(text) => {
             println!("Text: {:?}", text);
-
             println!("Parent: {:?}", parents.last());
-            let new_text: CowStr = match parents.last() {
-                Some(Tag::Link(..)) => return is_,
-                None | Some(_) => linkify_message_ids(text.borrow()).into(),
+
+            if let Some(Tag::Link(..)) = parents.last() {
+                return vec![Event::Text(text)].into_iter();
             };
 
-            // appease the lifetime gods by copying into a string
-            let new_string = new_text.to_string();
+            let mut events: Vec<Event> = Vec::new();
 
-            println!("new string: {}", new_string);
+            // message ids
+            let mut last_match_end = 0;
+            for mat in message_id_many_regex().find_iter(text.borrow()) {
+                let range = mat.range();
+                let match_start = range.start;
 
-            let link_tag = Tag::Link(
-                LinkType::Inline,
-                new_string.clone().into(),
-                new_string.clone().into(),
-            );
-            events.push(Event::Start(link_tag.clone()));
-            events.push(Event::End(link_tag.clone()));
+                // push previous text
+                events.push(Event::Text(
+                    text[last_match_end..match_start].to_string().into(),
+                ));
+
+                // push new link
+                let link_tag =
+                    Tag::Link(LinkType::Inline, mat.as_str().to_string().into(), "".into());
+                events.push(Event::Start(link_tag.clone()));
+                events.push(Event::Text(mat.as_str().to_string().into()));
+                events.push(Event::End(link_tag.clone()));
+
+                last_match_end = range.end;
+            }
+            // push last text
+            if last_match_end < text.len() - 1 {
+                events.push(Event::Text(
+                    text[last_match_end..text.len()].to_string().into(),
+                ));
+            }
+
+            events.into_iter()
         }
-        _ => {
-            events.push(event);
-        }
-    });
-    events.into_iter()
+        _ => vec![event].into_iter(),
+    })
 }
 
-pub fn linkify_message_ids(text: &str) -> Cow<str> {
+pub fn message_id_many_regex() -> &'static Regex {
     lazy_static! {
         static ref OG_RE: &'static str = ssb_ref::message_id_regex().as_str();
         static ref RE: Regex = Regex::new(&OG_RE[1..OG_RE.len() - 1]).unwrap();
     }
-    RE.replace_all(text, |caps: &Captures| {
-        format!("[{}]({})", &caps[0], &caps[0])
-    })
+    &*RE
 }
 
 #[cfg(test)]
@@ -156,7 +167,7 @@ mod tests {
         let expected = r###"
 * [%SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256](%SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256)
 * [%huSc8wPvcd6CE6p5Zwo7/geQyK1i4AZE4zr/8Ov94xI=.sha256](%huSc8wPvcd6CE6p5Zwo7/geQyK1i4AZE4zr/8Ov94xI=.sha256)
-"###.trim_start();
+"###.trim_start().trim_end();
         assert_eq!(actual, expected);
     }
 
