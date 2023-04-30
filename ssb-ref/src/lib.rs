@@ -1,9 +1,22 @@
 use base64::{
-    engine::{general_purpose::STANDARD as b64, Engine},
+    engine::{
+        general_purpose::STANDARD as b64, general_purpose::URL_SAFE_NO_PAD as b64url, Engine,
+    },
     DecodeError,
 };
 use lazy_static::lazy_static;
 use regex::Regex;
+
+pub fn link_id_single_regex() -> &'static Regex {
+    lazy_static! {
+        static ref RE: Regex = combine_regexes(vec![
+            message_id_single_regex(),
+            feed_id_single_regex(),
+            blob_id_single_regex(),
+        ]);
+    }
+    &*RE
+}
 
 pub fn link_id_multi_regex() -> &'static Regex {
     lazy_static! {
@@ -14,6 +27,11 @@ pub fn link_id_multi_regex() -> &'static Regex {
         ]);
     }
     &*RE
+}
+
+pub fn is_link_id(string: &str) -> bool {
+    let regex = link_id_single_regex();
+    regex.is_match(string)
 }
 
 pub fn message_id_single_regex() -> &'static Regex {
@@ -40,6 +58,11 @@ pub fn parse_message_id_data(id: &str) -> Result<Vec<u8>, DecodeError> {
     b64.decode(base64_data)
 }
 
+pub fn message_id_data_urlsafe(id: &str) -> String {
+    let data = parse_message_id_data(id).unwrap();
+    b64url.encode(data).to_string()
+}
+
 pub fn feed_id_single_regex() -> &'static Regex {
     lazy_static! {
         static ref RE: Regex = canonical_base64("@", ".ed25519", 32, true);
@@ -64,6 +87,11 @@ pub fn parse_feed_id_data(id: &str) -> Result<Vec<u8>, DecodeError> {
     b64.decode(base64_data)
 }
 
+pub fn feed_id_data_urlsafe(id: &str) -> String {
+    let data = parse_feed_id_data(id).unwrap();
+    b64url.encode(data).to_string()
+}
+
 pub fn blob_id_single_regex() -> &'static Regex {
     lazy_static! {
         static ref RE: Regex = canonical_base64("&", ".sha256", 32, true);
@@ -86,6 +114,11 @@ pub fn is_blob_id(string: &str) -> bool {
 pub fn parse_blob_id_data(id: &str) -> Result<Vec<u8>, DecodeError> {
     let base64_data = &id[1..id.len() - 7];
     b64.decode(base64_data)
+}
+
+pub fn blob_id_data_urlsafe(id: &str) -> String {
+    let data = parse_blob_id_data(id).unwrap();
+    b64url.encode(data).to_string()
 }
 
 // https://github.com/dominictarr/is-canonical-base64/blob/master/index.js

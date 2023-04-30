@@ -939,10 +939,8 @@ dependencies = [
 name = "ssb-markdown"
 version = "0.1.0"
 dependencies = [
- "lazy_static",
  "pulldown-cmark",
  "pulldown-cmark-to-cmark",
- "regex",
  "ssb-ref",
 ]
 

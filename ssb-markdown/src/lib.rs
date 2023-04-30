@@ -1,96 +1,100 @@
-use lazy_static::lazy_static;
 use pulldown_cmark::{html, CowStr, Event, LinkType, Options, Parser, Tag};
-use regex::{Captures, Regex};
 use ssb_ref::{
-    blob_id_multi_regex, feed_id_multi_regex, is_message_id, link_id_multi_regex,
-    message_id_multi_regex, parse_feed_id_data,
+    blob_id_data_urlsafe, feed_id_data_urlsafe, is_blob_id, is_feed_id, is_link_id, is_message_id,
+    link_id_multi_regex, message_id_data_urlsafe,
 };
-use std::{
-    borrow::{Borrow, Cow},
-    iter::Map,
-};
+use std::{borrow::Borrow, cell::RefCell, sync::Arc};
 
-pub fn parse(text: &str) -> impl Iterator<Item = Event> {
+pub fn render(text: &str) -> (String, Vec<String>) {
     let mut parser_opts = Options::empty();
     parser_opts.insert(Options::ENABLE_TABLES);
     parser_opts.insert(Options::ENABLE_STRIKETHROUGH);
     parser_opts.insert(Options::ENABLE_SMART_PUNCTUATION);
-    let parser = Parser::new_ext(text, parser_opts).map(move |event| {
-        match &event {
-            Event::Start(tag) => {
-                println!("Start: {:?}", tag);
-                match tag {
-                    Tag::Heading(heading_level, fragment_identifier, class_list) => println!(
-                        "Heading heading_level: {} fragment identifier: {:?} classes: {:?}",
-                        heading_level, fragment_identifier, class_list
-                    ),
-                    Tag::Paragraph => println!("Paragraph"),
-                    Tag::List(ordered_list_first_item_number) => println!(
-                        "List ordered_list_first_item_number: {:?}",
-                        ordered_list_first_item_number
-                    ),
-                    Tag::Item => println!("Item (this is a list item)"),
-                    Tag::Emphasis => println!("Emphasis (this is a span tag)"),
-                    Tag::Strong => println!("Strong (this is a span tag)"),
-                    Tag::Strikethrough => println!("Strikethrough (this is a span tag)"),
-                    Tag::BlockQuote => println!("BlockQuote"),
-                    Tag::CodeBlock(code_block_kind) => {
-                        println!("CodeBlock code_block_kind: {:?}", code_block_kind)
-                    }
-                    Tag::Link(link_type, url, title) => println!(
-                        "Link link_type: {:?} url: {} title: {}",
-                        link_type, url, title
-                    ),
-                    Tag::Image(link_type, url, title) => println!(
-                        "Image link_type: {:?} url: {} title: {}",
-                        link_type, url, title
-                    ),
-                    Tag::Table(column_text_alignment_list) => println!(
-                        "Table column_text_alignment_list: {:?}",
-                        column_text_alignment_list
-                    ),
-                    Tag::TableHead => println!("TableHead (contains TableRow tags"),
-                    Tag::TableRow => println!("TableRow (contains TableCell tags)"),
-                    Tag::TableCell => println!("TableCell (contains inline tags)"),
-                    Tag::FootnoteDefinition(label) => {
-                        println!("FootnoteDefinition label: {}", label)
-                    }
-                }
-            }
-            Event::End(tag) => {
-                println!("End: {:?}", tag);
-            }
-            Event::Html(s) => {
-                println!("Html: {:?}", s);
-            }
-            Event::Text(s) => {
-                println!("Text: {:?}", s)
-            }
-            Event::Code(s) => {
-                println!("Code: {:?}", s);
-            }
-            Event::FootnoteReference(s) => {
-                println!("FootnoteReference: {:?}", s)
-            }
-            Event::TaskListMarker(b) => println!("TaskListMarker: {:?}", b),
-            Event::SoftBreak => println!("SoftBreak"),
-            Event::HardBreak => println!("HardBreak"),
-            Event::Rule => println!("Rule"),
-        };
-        event
-    });
-    parser
+
+    let events = Parser::new_ext(text, parser_opts);
+    let events_2 = linkify(events);
+
+    let (events_3, links) = render_links(events_2);
+    let html = to_html(events_3.into_iter());
+
+    (html, (*links).clone().into_inner())
 }
 
-pub fn to_html(parser: Map<Parser, impl FnMut(Event) -> Event>) -> String {
+pub fn to_html<'a>(events: impl Iterator<Item = Event<'a>>) -> String {
     let mut html_buf = String::new();
-    html::push_html(&mut html_buf, parser);
+    html::push_html(&mut html_buf, events);
     html_buf
 }
 
-pub fn linkify(text: &str) -> impl Iterator<Item = Event> {
+pub fn render_links<'a>(
+    events: impl Iterator<Item = Event<'a>>,
+) -> (impl Iterator<Item = Event<'a>>, Arc<RefCell<Vec<String>>>) {
+    let links = Arc::new(RefCell::new(Vec::<String>::new()));
+    let links_ret = links.clone();
+
+    let next_events = events.map(move |event| match &event {
+        Event::Start(tag) => match tag {
+            Tag::Link(link_type, url, title) => {
+                if !is_link_id(url) {
+                    return event;
+                }
+
+                links.borrow_mut().push(url.to_string());
+
+                let next_url = render_link_url(url);
+                Event::Start(Tag::Link(*link_type, next_url.into(), title.clone()))
+            }
+            Tag::Image(link_type, url, title) => {
+                if !is_link_id(url) {
+                    return event;
+                }
+
+                links.borrow_mut().push(url.to_string());
+
+                let next_url = render_link_url(url);
+                Event::Start(Tag::Link(*link_type, next_url.into(), title.clone()))
+            }
+            _ => event,
+        },
+        Event::End(tag) => match tag {
+            Tag::Link(link_type, url, title) => {
+                if !is_link_id(url) {
+                    return event;
+                }
+
+                let next_url = render_link_url(url);
+                Event::End(Tag::Link(*link_type, next_url.into(), title.clone()))
+            }
+            Tag::Image(link_type, url, title) => {
+                if !is_link_id(url) {
+                    return event;
+                }
+                let next_url = render_link_url(url);
+                Event::End(Tag::Image(*link_type, next_url.into(), title.clone()))
+            }
+            _ => event,
+        },
+        _ => event,
+    });
+
+    (next_events, links_ret)
+}
+
+fn render_link_url(url: &str) -> String {
+    if is_message_id(url) {
+        format!("/message/{}", message_id_data_urlsafe(url))
+    } else if is_feed_id(url) {
+        format!("/feed/{}", feed_id_data_urlsafe(url))
+    } else if is_blob_id(url) {
+        format!("/blob/{}", blob_id_data_urlsafe(url))
+    } else {
+        url.to_string()
+    }
+}
+
+pub fn linkify<'a>(events: impl Iterator<Item = Event<'a>>) -> impl Iterator<Item = Event<'a>> {
     let mut parents: Vec<Tag> = Vec::new();
-    Parser::new(text).flat_map(move |event| match event {
+    events.flat_map(move |event| match event {
         Event::Start(tag) => {
             // println!("Start: {:?} (Parents: {:?})", tag, parents);
             parents.push(tag.clone());
@@ -163,7 +167,7 @@ mod tests {
 "###;
 
         let mut actual = String::new();
-        cmark(linkify(text), &mut actual).unwrap();
+        cmark(linkify(Parser::new(text)), &mut actual).unwrap();
 
         let expected = r###"
 * [%SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256](%SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256)
@@ -181,7 +185,7 @@ mod tests {
         .trim();
 
         let mut actual = String::new();
-        cmark(linkify(text), &mut actual).unwrap();
+        cmark(linkify(Parser::new(text)), &mut actual).unwrap();
 
         assert_eq!(actual, text);
     }
@@ -195,8 +199,32 @@ mod tests {
         .trim();
 
         let mut actual = String::new();
-        cmark(linkify(text), &mut actual).unwrap();
+        cmark(linkify(Parser::new(text)), &mut actual).unwrap();
 
         assert_eq!(actual, text);
+    }
+
+    #[test]
+    fn test_render_links() {
+        let text = r###"
+- ["TEST"](%SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256)
+- ["IT WORKS"](%huSc8wPvcd6CE6p5Zwo7/geQyK1i4AZE4zr/8Ov94xI=.sha256)
+        "###
+        .trim();
+
+        let expected_html = r###"
+<ul>
+<li><a href="/message/SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA">“TEST”</a></li>
+<li><a href="/message/huSc8wPvcd6CE6p5Zwo7_geQyK1i4AZE4zr_8Ov94xI">“IT WORKS”</a></li>
+</ul>
+"###
+        .trim_start();
+        let expected_links: Vec<String> = vec![
+            "%SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256".into(),
+            "%huSc8wPvcd6CE6p5Zwo7/geQyK1i4AZE4zr/8Ov94xI=.sha256".into(),
+        ];
+        let (actual_html, actual_links) = render(text);
+        assert_eq!(actual_html, expected_html);
+        assert_eq!(actual_links, expected_links);
     }
 }
