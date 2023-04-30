@@ -6,4 +6,5 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ssb-flume-follower-sql = { path = "../ssb-flume-follower-sql" }
+ssb-query = { path = "../ssb-query" }
+ssb-markdown = { path = "../ssb-markdown" }

@@ -1,4 +1,5 @@
-use ssb_flume_follower_sql::SsbQuery;
+use ssb_markdown::render;
+use ssb_query::{SelectAllMessagesByFeedOptions, SsbQuery};
 
 fn main() {
     let mut view = SsbQuery::new(
@@ -13,6 +14,27 @@ fn main() {
         println!("log latest: {:?}", view.get_log_latest());
         println!("view latest: {:?}", view.get_view_latest());
         view.process(10000);
+    }
+
+    let feed_id = "@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519";
+    let max_seq = view.select_max_seq_by_feed(feed_id).unwrap();
+
+    let messages = view
+        .select_all_messages_by_feed(SelectAllMessagesByFeedOptions {
+            feed_id,
+            content_type: "post",
+            page_size: 10,
+            less_than_seq: max_seq + 1,
+            is_decrypted: false,
+        })
+        .unwrap();
+
+    for message in messages {
+        println!("{:?}", message.value.content["text"]);
+        let content = message.value.content;
+        let text = content["text"].as_str().unwrap();
+        let html = render(text);
+        println!("{:?}", html);
     }
 
     // select all posts by a user

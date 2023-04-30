@@ -1,6 +1,108 @@
-use rusqlite::{Connection, Error};
+use rusqlite::{params, Connection, Error};
 
 use crate::sql::*;
+
+pub fn select_max_seq_by_feed<'a>(connection: &Connection, feed_id: &'a str) -> Result<i64, Error> {
+    let mut stmt = connection.prepare_cached(
+        "
+        SELECT
+          MAX(seq)
+        FROM messages_raw
+        JOIN authors ON authors.id = messages_raw.author_id
+        WHERE
+            authors.author = ?1
+        LIMIT 1
+        ",
+    )?;
+
+    let max_seq: i64 = stmt.query_row(params![feed_id], |row| Ok(row.get::<usize, i64>(0)?))?;
+    Ok(max_seq)
+}
+
+pub struct SelectAllMessagesByFeedOptions<'a> {
+    pub feed_id: &'a str,
+    pub content_type: &'a str,
+    pub page_size: i64,
+    pub less_than_seq: i64,
+    pub is_decrypted: bool,
+}
+
+pub fn select_all_messages_by_feed<'a>(
+    connection: &Connection,
+    options: SelectAllMessagesByFeedOptions<'a>,
+) -> Result<Vec<SsbMessage>, Error> {
+    let mut stmt = connection.prepare_cached(
+        "
+        SELECT
+            seq,
+            keys.key as key,
+            authors.author as author,
+            received_time,
+            asserted_time,
+            content,
+            is_decrypted
+        FROM messages_raw
+        JOIN keys ON keys.id = messages_raw.key_id
+        JOIN authors ON authors.id = messages_raw.author_id
+        WHERE
+            authors.author = ?1
+            AND content_type = ?2
+            AND seq < ?3
+            AND is_decrypted = ?4
+        ORDER BY seq DESC
+        LIMIT ?5
+        ",
+    )?;
+
+    let rows = stmt.query_map(
+        params![
+            options.feed_id,
+            options.content_type,
+            options.less_than_seq,
+            options.is_decrypted,
+            options.page_size,
+        ],
+        |row| {
+            Ok(SsbMessage {
+                key: row.get(1)?,
+                value: SsbValue {
+                    author: row.get(2)?,
+                    sequence: row.get(0)?,
+                    timestamp: row.get(4)?,
+                    content: row.get(5)?,
+                },
+                timestamp: row.get(3)?,
+            })
+        },
+    )?;
+
+    rows.collect()
+}
+// select all posts by a user
+//   - greater than seq
+//   - limit 10
+/*
+SELECT
+  seq,
+  keys.key as key,
+  authors.author as author,
+  asserted_time,
+  content_type,
+  content,
+  is_decrypted,
+  root_keys.key as root,
+  fork_keys.key as fork
+FROM messages_raw
+JOIN keys ON keys.id=messages_raw.key_id
+LEFT JOIN keys AS root_keys ON root_keys.id=messages_raw.root_id
+LEFT JOIN keys AS fork_keys ON fork_keys.id=messages_raw.fork_id
+JOIN authors ON authors.id=messages_raw.author_id
+WHERE
+        authors.author = '@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519'
+        AND content_type = 'post'
+        AND seq > 10
+LIMIT 10
+*/
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BackLink {
@@ -95,14 +197,10 @@ mod test {
         );
         assert_eq!(links.unwrap().len(), 1);
     }
-    fn create_test_db(
-        num_entries: usize,
-        offset_filename: &str,
-        db_filename: &str,
-    ) -> FlumeViewSql {
+    fn create_test_db(num_entries: usize, offset_filename: &str, db_filename: &str) -> SqlView {
         let keys = Vec::new();
         std::fs::remove_file(db_filename).unwrap_or(());
-        let mut view = FlumeViewSql::new(db_filename, keys, "").unwrap();
+        let mut view = SqlView::new(db_filename, keys, "").unwrap();
 
         let file = std::fs::File::open(offset_filename.to_string()).unwrap();
 

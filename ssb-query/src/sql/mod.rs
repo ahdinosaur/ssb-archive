@@ -19,8 +19,8 @@ mod links;
 mod mentions;
 mod messages;
 mod migrations;
-pub mod queries;
-mod votes; //TODO un pub
+mod queries;
+mod votes;
 use self::abouts::*;
 use self::authors::*;
 use self::blob_links::*;
@@ -32,37 +32,39 @@ use self::links::*;
 use self::mentions::*;
 use self::messages::*;
 use self::migrations::*;
+pub use self::queries::SelectAllMessagesByFeedOptions;
+use self::queries::*;
 use self::votes::*;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SsbValue {
-    author: String,
-    sequence: u32,
-    timestamp: f64,
-    content: Value,
+    pub author: String,
+    pub sequence: u32,
+    pub timestamp: f64,
+    pub content: Value,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SsbMessage {
-    key: String,
-    value: SsbValue,
-    timestamp: f64,
+    pub key: String,
+    pub value: SsbValue,
+    pub timestamp: f64,
 }
 
 #[derive(Debug, ThisError)]
-pub enum FlumeViewSqlError {
+pub enum SqlViewError {
     #[error("Db failed integrity check")]
     DbFailedIntegrityCheck {},
     #[error("Sql error")]
     Sql(#[from] SqlError),
 }
 
-pub struct FlumeViewSql {
+pub struct SqlView {
     pub connection: Connection,
     secret_keys: Vec<Keypair>,
 }
 
-impl FlumeView for FlumeViewSql {
+impl FlumeView for SqlView {
     fn append(&mut self, seq: Sequence, item: &[u8]) {
         append_item(&self.connection, &self.secret_keys, seq, item).unwrap()
     }
@@ -79,12 +81,12 @@ fn create_connection(path: &str) -> Result<Connection, SqlError> {
     Connection::open_with_flags(path, flags)
 }
 
-impl FlumeViewSql {
+impl SqlView {
     pub fn new(
         path: &str,
         secret_keys: Vec<Keypair>,
         pub_key: &str,
-    ) -> Result<FlumeViewSql, FlumeViewSqlError> {
+    ) -> Result<SqlView, SqlViewError> {
         let mut connection = create_connection(path)?;
 
         if let Ok(false) = is_db_up_to_date(&connection) {
@@ -103,13 +105,13 @@ impl FlumeViewSql {
 
         set_pragmas(&connection);
 
-        Ok(FlumeViewSql {
+        Ok(SqlView {
             connection,
             secret_keys,
         })
     }
 
-    pub fn get_seq_by_key(&mut self, key: &str) -> Result<i64, FlumeViewSqlError> {
+    pub fn get_seq_by_key(&mut self, key: &str) -> Result<i64, SqlViewError> {
         let mut stmt = self
             .connection
             .prepare("SELECT flume_seq FROM messages_raw JOIN keys ON messages_raw.key_id=keys.id WHERE keys.key=?1")?;
@@ -117,7 +119,7 @@ impl FlumeViewSql {
         Ok(stmt.query_row(&[key], |row| Ok(row.get(0)?))?)
     }
 
-    pub fn get_seqs_by_type(&mut self, content_type: &str) -> Result<Vec<i64>, FlumeViewSqlError> {
+    pub fn get_seqs_by_type(&mut self, content_type: &str) -> Result<Vec<i64>, SqlViewError> {
         let mut stmt = self
             .connection
             .prepare("SELECT flume_seq FROM messages_raw WHERE content_type=?1")?;
@@ -132,7 +134,7 @@ impl FlumeViewSql {
         Ok(seqs)
     }
 
-    pub fn get_seqs_by_author(&mut self, author: &str) -> Result<Vec<i64>, FlumeViewSqlError> {
+    pub fn get_seqs_by_author(&mut self, author: &str) -> Result<Vec<i64>, SqlViewError> {
         let mut stmt = self
             .connection
             .prepare("SELECT flume_seq FROM messages_raw JOIN authors ON messages_raw.author_id=authors.id WHERE author=?1")?;
@@ -158,7 +160,7 @@ impl FlumeViewSql {
         tx.commit().unwrap();
     }
 
-    pub fn check_db_integrity(&mut self) -> Result<(), FlumeViewSqlError> {
+    pub fn check_db_integrity(&mut self) -> Result<(), SqlViewError> {
         self.connection
             .query_row_and_then("PRAGMA integrity_check", (), |row| {
                 row.get(0)
@@ -167,12 +169,12 @@ impl FlumeViewSql {
                         if res == "ok" {
                             return Ok(());
                         }
-                        Err(FlumeViewSqlError::DbFailedIntegrityCheck {}.into())
+                        Err(SqlViewError::DbFailedIntegrityCheck {}.into())
                     })
             })
     }
 
-    pub fn get_latest(&self) -> Result<Option<Sequence>, FlumeViewSqlError> {
+    pub fn get_latest(&self) -> Result<Option<Sequence>, SqlViewError> {
         let mut stmt = self
             .connection
             .prepare_cached("SELECT MAX(flume_seq) FROM messages_raw")?;
@@ -182,6 +184,17 @@ impl FlumeViewSql {
             trace!("got latest seq from db: {:?}", res);
             Ok(res.map(|v| v as Sequence))
         })?)
+    }
+
+    pub fn select_all_messages_by_feed(
+        &self,
+        options: SelectAllMessagesByFeedOptions,
+    ) -> Result<Vec<SsbMessage>, SqlViewError> {
+        Ok(select_all_messages_by_feed(&self.connection, options)?)
+    }
+
+    pub fn select_max_seq_by_feed(&self, feed_id: &str) -> Result<i64, SqlViewError> {
+        Ok(select_max_seq_by_feed(&self.connection, feed_id)?)
     }
 }
 
@@ -357,7 +370,7 @@ mod test {
         std::fs::remove_file(filename.clone())
             .or::<Result<()>>(Ok(()))
             .unwrap();
-        FlumeViewSql::new(filename, keys, "").unwrap();
+        SqlView::new(filename, keys, "").unwrap();
         assert!(true)
     }
 
@@ -370,7 +383,7 @@ mod test {
             .or::<Result<()>>(Ok(()))
             .unwrap();
 
-        let mut view = FlumeViewSql::new(filename, keys, "").unwrap();
+        let mut view = SqlView::new(filename, keys, "").unwrap();
         let jsn = r#####"{
   "key": "%KKPLj1tWfuVhCvgJz2hG/nIsVzmBRzUJaqHv+sb+n1c=.sha256",
   "value": {
@@ -415,9 +428,10 @@ mod test {
             .or::<Result<()>>(Ok(()))
             .unwrap();
 
-        let mut view = FlumeViewSql::new(filename, keys, "").unwrap();
+        let mut view = SqlView::new(filename, keys, "").unwrap();
         view.check_db_integrity().unwrap();
     }
+
     #[test]
     fn test_db_integrity_fails() {
         let filename = "/tmp/test_integrity_bad.sqlite3";
@@ -426,7 +440,7 @@ mod test {
             .or::<Result<()>>(Ok(()))
             .unwrap();
 
-        let mut view = FlumeViewSql::new(filename.clone(), keys, "").unwrap();
+        let mut view = SqlView::new(filename.clone(), keys, "").unwrap();
 
         std::fs::write(filename, b"BANG").unwrap();
 

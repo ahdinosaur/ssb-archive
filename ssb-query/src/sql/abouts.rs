@@ -68,15 +68,15 @@ pub fn create_abouts_views(connection: &Connection) -> Result<usize, Error> {
         "
         CREATE VIEW IF NOT EXISTS abouts AS
         SELECT 
-        abouts_raw.id as id, 
-        abouts_raw.link_from_key_id as link_from_key_id, 
-        abouts_raw.link_to_key_id as link_to_key_id, 
-        abouts_raw.link_to_author_id as link_to_author_id, 
-        keys_from.key as link_from_key, 
-        keys_to.key as link_to_key, 
-        authors_to.author as link_to_author,
-        messages.content as content
-        messages.author as link_from_author,
+            abouts_raw.id as id, 
+            abouts_raw.link_from_key_id as link_from_key_id, 
+            abouts_raw.link_to_key_id as link_to_key_id, 
+            abouts_raw.link_to_author_id as link_to_author_id, 
+            keys_from.key as link_from_key, 
+            keys_to.key as link_to_key, 
+            authors_to.author as link_to_author,
+            messages.content as content,
+            messages.author as link_from_author
         FROM abouts_raw 
         JOIN keys AS keys_from ON keys_from.id=abouts_raw.link_from_key_id
         JOIN messages ON link_from_key_id=messages.key_id

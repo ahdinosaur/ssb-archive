@@ -897,7 +897,8 @@ checksum = "a507befe795404456341dfab10cef66ead4c041f62b8b11bbb92bffe5d0953e0"
 name = "ssb-archive"
 version = "0.1.0"
 dependencies = [
- "ssb-flume-follower-sql",
+ "ssb-markdown",
+ "ssb-query",
 ]
 
 [[package]]
@@ -920,22 +921,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ssb-flume-follower-sql"
-version = "0.1.0"
-dependencies = [
- "base64 0.21.0",
- "flumedb",
- "itertools",
- "log",
- "private-box",
- "rusqlite",
- "serde",
- "serde_derive",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
 name = "ssb-markdown"
 version = "0.1.0"
 dependencies = [
@@ -953,6 +938,22 @@ dependencies = [
  "base64 0.13.1",
  "serde",
  "ssb-crypto",
+]
+
+[[package]]
+name = "ssb-query"
+version = "0.1.0"
+dependencies = [
+ "base64 0.21.0",
+ "flumedb",
+ "itertools",
+ "log",
+ "private-box",
+ "rusqlite",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

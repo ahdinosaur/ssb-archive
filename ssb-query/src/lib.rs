@@ -1,16 +1,17 @@
 use std::fs::OpenOptions;
 
-use flumedb::{BidirIterator, FlumeLog, IterAtOffset, OffsetLog, OffsetLogIter, Sequence};
+use flumedb::{FlumeLog, IterAtOffset, OffsetLog, Sequence};
 
 use itertools::Itertools;
 use private_box::Keypair;
 
 pub mod sql;
-pub use sql::FlumeViewSql;
-use sql::FlumeViewSqlError;
+pub use sql::SelectAllMessagesByFeedOptions;
+use sql::SqlViewError;
+pub use sql::{SqlView, SsbMessage, SsbValue};
 
 pub struct SsbQuery {
-    view: FlumeViewSql,
+    view: SqlView,
     log: OffsetLog<u32>,
 }
 
@@ -20,7 +21,7 @@ impl SsbQuery {
         view_path: String,
         keys: Vec<Keypair>,
         pub_key: &str,
-    ) -> Result<SsbQuery, FlumeViewSqlError> {
+    ) -> Result<SsbQuery, SqlViewError> {
         let log_file = OpenOptions::new()
             .read(true)
             .write(false)
@@ -28,7 +29,7 @@ impl SsbQuery {
             .open(&log_path)
             .unwrap();
         let log = OffsetLog::<u32>::from_file(log_file).unwrap();
-        let view = FlumeViewSql::new(&view_path, keys, pub_key)?;
+        let view = SqlView::new(&view_path, keys, pub_key)?;
 
         Ok(SsbQuery { view, log })
     }
@@ -62,5 +63,18 @@ impl SsbQuery {
                 let vec = chunk.collect_vec();
                 self.view.append_batch(&vec);
             })
+    }
+
+    // queries
+
+    pub fn select_all_messages_by_feed(
+        &self,
+        options: SelectAllMessagesByFeedOptions,
+    ) -> Result<Vec<SsbMessage>, SqlViewError> {
+        Ok(self.view.select_all_messages_by_feed(options)?)
+    }
+
+    pub fn select_max_seq_by_feed(&self, feed_id: &str) -> Result<i64, SqlViewError> {
+        Ok(self.view.select_max_seq_by_feed(feed_id)?)
     }
 }
