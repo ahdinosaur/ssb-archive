@@ -1,7 +1,10 @@
 use lazy_static::lazy_static;
 use pulldown_cmark::{html, CowStr, Event, LinkType, Options, Parser, Tag};
 use regex::{Captures, Regex};
-use ssb_ref::{is_message_id, message_id_regex, parse_feed_id_data};
+use ssb_ref::{
+    blob_id_multi_regex, feed_id_multi_regex, is_message_id, link_id_multi_regex,
+    message_id_multi_regex, parse_feed_id_data,
+};
 use std::{
     borrow::{Borrow, Cow},
     iter::Map,
@@ -89,64 +92,62 @@ pub fn linkify(text: &str) -> impl Iterator<Item = Event> {
     let mut parents: Vec<Tag> = Vec::new();
     Parser::new(text).flat_map(move |event| match event {
         Event::Start(tag) => {
-            println!("Start: {:?} (Parents: {:?})", tag, parents);
+            // println!("Start: {:?} (Parents: {:?})", tag, parents);
             parents.push(tag.clone());
             vec![Event::Start(tag)].into_iter()
         }
         Event::End(tag) => {
-            println!("End: {:?} (Parents: {:?})", tag, parents);
+            // println!("End: {:?} (Parents: {:?})", tag, parents);
             parents.pop();
             vec![Event::End(tag)].into_iter()
         }
         Event::Text(text) => {
-            println!("Text: {:?}", text);
-            println!("Parent: {:?}", parents.last());
+            // println!("Text: {:?}", text);
+            // println!("Parent: {:?}", parents.last());
 
             if let Some(Tag::Link(..)) = parents.last() {
                 return vec![Event::Text(text)].into_iter();
             };
 
-            let mut events: Vec<Event> = Vec::new();
-
             // message ids
-            let mut last_match_end = 0;
-            for mat in message_id_many_regex().find_iter(text.borrow()) {
-                let range = mat.range();
-                let match_start = range.start;
-
-                // push previous text
-                events.push(Event::Text(
-                    text[last_match_end..match_start].to_string().into(),
-                ));
-
-                // push new link
-                let link_tag =
-                    Tag::Link(LinkType::Inline, mat.as_str().to_string().into(), "".into());
-                events.push(Event::Start(link_tag.clone()));
-                events.push(Event::Text(mat.as_str().to_string().into()));
-                events.push(Event::End(link_tag.clone()));
-
-                last_match_end = range.end;
-            }
-            // push last text
-            if last_match_end < text.len() - 1 {
-                events.push(Event::Text(
-                    text[last_match_end..text.len()].to_string().into(),
-                ));
-            }
-
+            let mut events: Vec<Event> = Vec::new();
+            events.append(&mut linkify_text(text.clone()));
             events.into_iter()
         }
         _ => vec![event].into_iter(),
     })
 }
 
-pub fn message_id_many_regex() -> &'static Regex {
-    lazy_static! {
-        static ref OG_RE: &'static str = ssb_ref::message_id_regex().as_str();
-        static ref RE: Regex = Regex::new(&OG_RE[1..OG_RE.len() - 1]).unwrap();
+fn linkify_text<'a>(text: CowStr<'a>) -> Vec<Event<'a>> {
+    let mut events: Vec<Event> = Vec::new();
+
+    // message ids
+    let mut last_match_end = 0;
+    for mat in link_id_multi_regex().find_iter(text.borrow()) {
+        let range = mat.range();
+        let match_start = range.start;
+
+        // push previous text
+        events.push(Event::Text(
+            text[last_match_end..match_start].to_string().into(),
+        ));
+
+        // push new link
+        let link_tag = Tag::Link(LinkType::Inline, mat.as_str().to_string().into(), "".into());
+        events.push(Event::Start(link_tag.clone()));
+        events.push(Event::Text(mat.as_str().to_string().into()));
+        events.push(Event::End(link_tag.clone()));
+
+        last_match_end = range.end;
     }
-    &*RE
+    // push last text
+    if last_match_end < text.len() - 1 {
+        events.push(Event::Text(
+            text[last_match_end..text.len()].to_string().into(),
+        ));
+    }
+
+    events
 }
 
 #[cfg(test)]
@@ -155,7 +156,7 @@ mod tests {
     use pulldown_cmark_to_cmark::cmark;
 
     #[test]
-    fn test_message_ids_unlinked() {
+    fn test_linkify_message_ids_unlinked() {
         let text = r###"
 * %SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256
 * %huSc8wPvcd6CE6p5Zwo7/geQyK1i4AZE4zr/8Ov94xI=.sha256
@@ -167,21 +168,35 @@ mod tests {
         let expected = r###"
 * [%SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256](%SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256)
 * [%huSc8wPvcd6CE6p5Zwo7/geQyK1i4AZE4zr/8Ov94xI=.sha256](%huSc8wPvcd6CE6p5Zwo7/geQyK1i4AZE4zr/8Ov94xI=.sha256)
-"###.trim_start().trim_end();
+"###.trim();
         assert_eq!(actual, expected);
     }
 
-    /*
-        #[test]
-        fn test_message_id_linked() {
-            let text = r###"
-    - ["TEST"](%SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256)
-    - ["IT WORKS"](%huSc8wPvcd6CE6p5Zwo7/geQyK1i4AZE4zr/8Ov94xI=.sha256)
-        "###;
-            let (html, links) = render(text);
-            println!("{}", html);
-            assert_eq!(html, "".to_string());
-            assert_eq!(links, vec![]);
-        }
-        */
+    #[test]
+    fn test_linkify_message_id_linked_with_id_label() {
+        let text = r###"
+* [%SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256](%SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256)
+* [%huSc8wPvcd6CE6p5Zwo7/geQyK1i4AZE4zr/8Ov94xI=.sha256](%huSc8wPvcd6CE6p5Zwo7/geQyK1i4AZE4zr/8Ov94xI=.sha256)
+        "###
+        .trim();
+
+        let mut actual = String::new();
+        cmark(linkify(text), &mut actual).unwrap();
+
+        assert_eq!(actual, text);
+    }
+
+    #[test]
+    fn test_linkify_message_id_linked_with_name_label() {
+        let text = r###"
+* ["TEST"](%SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256)
+* ["IT WORKS"](%huSc8wPvcd6CE6p5Zwo7/geQyK1i4AZE4zr/8Ov94xI=.sha256)
+        "###
+        .trim();
+
+        let mut actual = String::new();
+        cmark(linkify(text), &mut actual).unwrap();
+
+        assert_eq!(actual, text);
+    }
 }

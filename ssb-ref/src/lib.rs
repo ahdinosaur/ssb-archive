@@ -5,15 +5,33 @@ use base64::{
 use lazy_static::lazy_static;
 use regex::Regex;
 
-pub fn message_id_regex() -> &'static Regex {
+pub fn link_id_multi_regex() -> &'static Regex {
     lazy_static! {
-        static ref RE: Regex = canonical_base64("%", ".sha256", 32);
+        static ref RE: Regex = combine_regexes(vec![
+            message_id_multi_regex(),
+            feed_id_multi_regex(),
+            blob_id_multi_regex(),
+        ]);
+    }
+    &*RE
+}
+
+pub fn message_id_single_regex() -> &'static Regex {
+    lazy_static! {
+        static ref RE: Regex = canonical_base64("%", ".sha256", 32, true);
+    }
+    &*RE
+}
+
+pub fn message_id_multi_regex() -> &'static Regex {
+    lazy_static! {
+        static ref RE: Regex = canonical_base64("%", ".sha256", 32, false);
     }
     &*RE
 }
 
 pub fn is_message_id(string: &str) -> bool {
-    let regex = message_id_regex();
+    let regex = message_id_single_regex();
     regex.is_match(string)
 }
 
@@ -22,15 +40,22 @@ pub fn parse_message_id_data(id: &str) -> Result<Vec<u8>, DecodeError> {
     b64.decode(base64_data)
 }
 
-pub fn feed_id_regex() -> &'static Regex {
+pub fn feed_id_single_regex() -> &'static Regex {
     lazy_static! {
-        static ref RE: Regex = canonical_base64("@", ".ed25519", 32);
+        static ref RE: Regex = canonical_base64("@", ".ed25519", 32, true);
+    }
+    &*RE
+}
+
+pub fn feed_id_multi_regex() -> &'static Regex {
+    lazy_static! {
+        static ref RE: Regex = canonical_base64("@", ".ed25519", 32, false);
     }
     &*RE
 }
 
 pub fn is_feed_id(string: &str) -> bool {
-    let regex = feed_id_regex();
+    let regex = feed_id_single_regex();
     regex.is_match(string)
 }
 
@@ -39,15 +64,22 @@ pub fn parse_feed_id_data(id: &str) -> Result<Vec<u8>, DecodeError> {
     b64.decode(base64_data)
 }
 
-pub fn blob_id_regex() -> &'static Regex {
+pub fn blob_id_single_regex() -> &'static Regex {
     lazy_static! {
-        static ref RE: Regex = canonical_base64("&", ".sha256", 32);
+        static ref RE: Regex = canonical_base64("&", ".sha256", 32, true);
+    }
+    &*RE
+}
+
+pub fn blob_id_multi_regex() -> &'static Regex {
+    lazy_static! {
+        static ref RE: Regex = canonical_base64("&", ".sha256", 32, false);
     }
     &*RE
 }
 
 pub fn is_blob_id(string: &str) -> bool {
-    let regex = blob_id_regex();
+    let regex = blob_id_single_regex();
     regex.is_match(string)
 }
 
@@ -57,13 +89,15 @@ pub fn parse_blob_id_data(id: &str) -> Result<Vec<u8>, DecodeError> {
 }
 
 // https://github.com/dominictarr/is-canonical-base64/blob/master/index.js
-fn canonical_base64(prefix: &str, suffix: &str, length: u32) -> Regex {
+fn canonical_base64(prefix: &str, suffix: &str, length: u32, include_start_and_end: bool) -> Regex {
     let char = "[a-zA-Z0-9/+]";
     let trail2 = "[AQgw]==";
     let trail4 = "[AEIMQUYcgkosw048]=";
 
     let mut re = String::new();
-    re.push_str("^");
+    if include_start_and_end {
+        re.push_str("^");
+    }
     re.push_str(prefix);
     re.push_str(char);
     re.push_str("{");
@@ -80,9 +114,26 @@ fn canonical_base64(prefix: &str, suffix: &str, length: u32) -> Regex {
     });
 
     re.push_str(suffix);
-    re.push_str("$");
+    if include_start_and_end {
+        re.push_str("$");
+    }
 
     Regex::new(&re).unwrap()
+}
+
+fn combine_regexes(regexes: Vec<&Regex>) -> Regex {
+    let mut string = String::new();
+    string.push_str("(");
+    string.push_str(
+        regexes
+            .into_iter()
+            .map(|regex| regex.as_str())
+            .collect::<Vec<&str>>()
+            .join("|")
+            .as_str(),
+    );
+    string.push_str(")");
+    Regex::new(&string).unwrap()
 }
 
 #[cfg(test)]
