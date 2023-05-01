@@ -104,21 +104,22 @@ WHERE
 LIMIT 10
 */
 
-/*
 #[derive(Serialize, Deserialize, Debug)]
-pub struct BackLink {
-    id: String,
-    author: String,
-    timestamp: f64,
+pub enum Link {
+    Out {
+        id: String,
+        author: String,
+        timestamp: f64,
+    },
+    Back {
+        id: String,
+        author: String,
+        timestamp: f64,
+    },
 }
 
-pub fn back_link_references(
-    connection: &Connection,
-    id: &str,
-    timestamp: f64,
-) -> Result<Vec<BackLink>, Error> {
-    let mut stmt = connection.prepare_cached(
-        "
+pub fn select_out_links_by_message(connection: &Connection, id: &str) -> Result<Vec<Link>, Error> {
+    /*
         SELECT
             links.link_from_key as id,
             messages.author as author,
@@ -130,20 +131,78 @@ pub fn back_link_references(
         AND NOT content_type = 'about'
         AND NOT content_type = 'vote'
         AND NOT content_type = 'tag'
+    */
+    let mut stmt = connection.prepare_cached(
+        "
+        SELECT
+                links.link_to_key as id,
+                authors.author as author,
+                messages_raw.asserted_time as timestamp
+        FROM links
+        JOIN keys ON keys.key = links.link_to_key
+        JOIN messages_raw ON messages_raw.key_id = keys.id
+        JOIN authors ON authors.id = messages_raw.author_id
+        LEFT JOIN keys AS root_keys ON root_keys.id = messages_raw.root_id
+        WHERE link_from_key = ?1
+        AND root_keys.key = ?2
+        AND content_type = ?3
 ",
     )?;
 
-    let rows = stmt.query_map(&[&id, &id], |row| {
-        Ok(BackLink {
-            id: row.get::<usize, String>(0)?,
-            author: row.get::<usize, String>(1)?,
-            timestamp: row.get::<usize, f64>(2)?,
+    let rows = stmt.query_map(&[id, id, "post"], |row| {
+        Ok(Link::Back {
+            id: row.get(0)?,
+            author: row.get(1)?,
+            timestamp: row.get(2)?,
         })
     })?;
 
     rows.collect()
 }
 
+pub fn select_back_links_by_message(connection: &Connection, id: &str) -> Result<Vec<Link>, Error> {
+    /*
+        SELECT
+            links.link_from_key as id,
+            messages.author as author,
+            messages.received_time as timestamp
+        FROM links
+        JOIN messages ON messages.key = links.link_from_key
+        WHERE link_to_key = ?
+        AND NOT root = ?
+        AND NOT content_type = 'about'
+        AND NOT content_type = 'vote'
+        AND NOT content_type = 'tag'
+    */
+    let mut stmt = connection.prepare_cached(
+        "
+        SELECT
+                links.link_from_key as id,
+                authors.author as author,
+                messages_raw.asserted_time as timestamp
+        FROM links
+        JOIN keys ON keys.key = links.link_from_key
+        JOIN messages_raw ON messages_raw.key_id = keys.id
+        JOIN authors ON authors.id = messages_raw.author_id
+        LEFT JOIN keys AS root_keys ON root_keys.id = messages_raw.root_id
+        WHERE link_to_key = ?1
+        AND root_keys.key = ?2
+        AND content_type = ?3
+",
+    )?;
+
+    let rows = stmt.query_map(&[id, id, "post"], |row| {
+        Ok(Link::Back {
+            id: row.get(0)?,
+            author: row.get(1)?,
+            timestamp: row.get(2)?,
+        })
+    })?;
+
+    rows.collect()
+}
+
+/*
 pub fn how_many_friends_follow_id() {}
 pub fn who_is_friends_with_id() {}
 pub fn who_does_id_follow_one_way() {}
