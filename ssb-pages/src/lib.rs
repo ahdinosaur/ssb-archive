@@ -6,7 +6,7 @@ pub enum PageError {
     BadContent,
 }
 
-pub fn render_post(message: SsbMessage) -> Result<(DOMTree<String>, Vec<String>), PageError> {
+pub fn render_post(message: SsbMessage) -> Result<DOMTree<String>, PageError> {
     let value = message.value;
     let content = value.content;
     let content_type = content["type"].as_str().ok_or(PageError::BadContent)?;
@@ -15,7 +15,7 @@ pub fn render_post(message: SsbMessage) -> Result<(DOMTree<String>, Vec<String>)
     let content_root = content["root"].as_str().ok_or(PageError::BadContent)?;
     let content_fork = content["fork"].as_str().ok_or(PageError::BadContent)?;
 
-    let (content_html, outbound_links) = render(content_text);
+    let content_html = render(content_text);
 
     let post_html = html!(
         <div id=message.key.as_str() class=content_type>
@@ -27,7 +27,7 @@ pub fn render_post(message: SsbMessage) -> Result<(DOMTree<String>, Vec<String>)
         </div>
     );
 
-    Ok((post_html, outbound_links))
+    Ok(post_html)
 }
 
 #[cfg(test)]

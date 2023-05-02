@@ -3,9 +3,16 @@ use ssb_ref::{
     blob_id_data_urlsafe, feed_id_data_urlsafe, is_blob_id, is_feed_id, is_link_id, is_message_id,
     link_id_multi_regex, message_id_data_urlsafe,
 };
-use std::{borrow::Borrow, cell::RefCell, sync::Arc};
+use std::borrow::Borrow;
 
-pub fn render(text: &str) -> (String, Vec<String>) {
+/*
+struct Link<'a> {
+    url: &'a str,
+    label: &'a str,
+}
+*/
+
+pub fn render(text: &str) -> String {
     let mut parser_opts = Options::empty();
     parser_opts.insert(Options::ENABLE_TABLES);
     parser_opts.insert(Options::ENABLE_STRIKETHROUGH);
@@ -14,10 +21,10 @@ pub fn render(text: &str) -> (String, Vec<String>) {
     let events = Parser::new_ext(text, parser_opts);
     let events_2 = linkify(events);
 
-    let (events_3, links) = render_links(events_2);
+    let events_3 = render_links(events_2);
     let html = to_html(events_3.into_iter());
 
-    (html, (*links).clone().into_inner())
+    html
 }
 
 pub fn to_html<'a>(events: impl Iterator<Item = Event<'a>>) -> String {
@@ -26,21 +33,13 @@ pub fn to_html<'a>(events: impl Iterator<Item = Event<'a>>) -> String {
     html_buf
 }
 
-pub fn render_links<'a>(
-    events: impl Iterator<Item = Event<'a>>,
-) -> (impl Iterator<Item = Event<'a>>, Arc<RefCell<Vec<String>>>) {
-    let links = Arc::new(RefCell::new(Vec::<String>::new()));
-    let links_ret = links.clone();
-
-    let next_events = events.map(move |event| match &event {
+fn render_links<'a>(events: impl Iterator<Item = Event<'a>>) -> impl Iterator<Item = Event<'a>> {
+    events.map(move |event| match &event {
         Event::Start(tag) => match tag {
             Tag::Link(link_type, url, title) => {
                 if !is_link_id(url) {
                     return event;
                 }
-
-                links.borrow_mut().push(url.to_string());
-
                 let next_url = render_link_url(url);
                 Event::Start(Tag::Link(*link_type, next_url.into(), title.clone()))
             }
@@ -48,9 +47,6 @@ pub fn render_links<'a>(
                 if !is_link_id(url) {
                     return event;
                 }
-
-                links.borrow_mut().push(url.to_string());
-
                 let next_url = render_link_url(url);
                 Event::Start(Tag::Link(*link_type, next_url.into(), title.clone()))
             }
@@ -61,7 +57,6 @@ pub fn render_links<'a>(
                 if !is_link_id(url) {
                     return event;
                 }
-
                 let next_url = render_link_url(url);
                 Event::End(Tag::Link(*link_type, next_url.into(), title.clone()))
             }
@@ -75,9 +70,7 @@ pub fn render_links<'a>(
             _ => event,
         },
         _ => event,
-    });
-
-    (next_events, links_ret)
+    })
 }
 
 fn render_link_url(url: &str) -> String {
@@ -154,6 +147,33 @@ fn linkify_text<'a>(text: CowStr<'a>) -> Vec<Event<'a>> {
     events
 }
 
+pub fn collect_links(text: &str) -> Vec<String> {
+    let events = linkify(Parser::new(text));
+
+    let mut links = Vec::<String>::new();
+
+    for event in events {
+        match &event {
+            Event::Start(tag) => match tag {
+                Tag::Link(_link_type, url, _title) => {
+                    if is_link_id(url) {
+                        links.push(url.to_string());
+                    }
+                }
+                Tag::Image(_link_type, url, _title) => {
+                    if is_link_id(url) {
+                        links.push(url.to_string());
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    links
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,12 +239,22 @@ mod tests {
 </ul>
 "###
         .trim_start();
+        let actual_html = render(text);
+        assert_eq!(actual_html, expected_html);
+    }
+
+    #[test]
+    fn test_collect_links() {
+        let text = r###"
+- %SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256
+- ["IT WORKS"](%huSc8wPvcd6CE6p5Zwo7/geQyK1i4AZE4zr/8Ov94xI=.sha256)
+        "###;
+
         let expected_links: Vec<String> = vec![
             "%SABuw7mOMKT5E8g6vp7ZZl8cqJfsIPPF44QpFE6p6sA=.sha256".into(),
             "%huSc8wPvcd6CE6p5Zwo7/geQyK1i4AZE4zr/8Ov94xI=.sha256".into(),
         ];
-        let (actual_html, actual_links) = render(text);
-        assert_eq!(actual_html, expected_html);
+        let actual_links = collect_links(text);
         assert_eq!(actual_links, expected_links);
     }
 }
