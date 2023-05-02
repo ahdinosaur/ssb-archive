@@ -1,7 +1,7 @@
 use log::trace;
-use rusqlite::{Connection, Error};
+use sqlx::{query, Error, SqliteConnection};
 
-pub fn find_or_create_blob(connection: &Connection, blob: &str) -> Result<i64, Error> {
+pub fn find_or_create_blob(connection: &mut SqliteConnection, blob: &str) -> Result<i64, Error> {
     let mut stmt = connection.prepare_cached("SELECT id FROM blobs WHERE blob=?1")?;
 
     stmt.query_row(&[blob], |row| row.get(0)).or_else(|_| {
@@ -12,7 +12,7 @@ pub fn find_or_create_blob(connection: &Connection, blob: &str) -> Result<i64, E
     })
 }
 
-pub fn create_blobs_tables(connection: &Connection) -> Result<usize, Error> {
+pub fn create_blobs_tables(connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating blobs tables");
     connection.execute(
         "CREATE TABLE IF NOT EXISTS blobs (

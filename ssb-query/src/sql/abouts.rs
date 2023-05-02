@@ -1,70 +1,74 @@
 use log::trace;
-use rusqlite::types::Null;
-use rusqlite::{Connection, Error};
+use sqlx::{query, Error, SqliteConnection};
 
 use crate::sql::*;
 
-pub fn create_abouts_tables(connection: &Connection) -> Result<usize, Error> {
+pub async fn create_abouts_tables(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating abouts tables");
 
-    connection.execute(
+    query(
         "CREATE TABLE IF NOT EXISTS abouts_raw (
           id INTEGER PRIMARY KEY,
           link_from_key_id INTEGER,
           link_to_author_id INTEGER,
           link_to_key_id INTEGER
         )",
-        (),
     )
+    .execute(connection)
+    .await?;
+
+    Ok(())
 }
 
-pub fn insert_abouts(connection: &Connection, message: &SsbMessage, message_key_id: i64) {
+pub async fn insert_abouts(
+    connection: &mut SqliteConnection,
+    message: &SsbMessage,
+    message_key_id: i64,
+) -> Result<(), Error> {
     if let Value::String(about_key) = &message.value.content["about"] {
         let key;
 
-        let (link_to_author_id, link_to_key_id): (&dyn ToSql, &dyn ToSql) =
-            match about_key.get(0..1) {
-                Some("@") => {
-                    key = find_or_create_author(connection, about_key).unwrap();
-                    (&key, &Null)
-                }
-                Some("%") => {
-                    key = find_or_create_key(connection, about_key).unwrap();
-                    (&Null, &key)
-                }
-                _ => (&Null, &Null),
-            };
+        let (link_to_author_id, link_to_key_id) = match about_key.get(0..1) {
+            Some("@") => {
+                key = find_or_create_author(connection, about_key).unwrap();
+                (Some(key), None)
+            }
+            Some("%") => {
+                key = find_or_create_key(connection, about_key).unwrap();
+                (None, Some(key))
+            }
+            _ => (None, None),
+        };
 
-        let mut insert_abouts_stmt = connection
-            .prepare_cached("INSERT INTO abouts_raw (link_from_key_id, link_to_author_id, link_to_key_id) VALUES (?, ?, ?)")
-            .unwrap();
-
-        insert_abouts_stmt
-            .execute(&[&message_key_id, link_to_author_id, link_to_key_id])
-            .unwrap();
+        query("INSERT INTO abouts_raw (link_from_key_id, link_to_author_id, link_to_key_id) VALUES (?, ?, ?)")
+            .bind(&message_key_id)
+            .bind(&link_to_author_id)
+            .bind(&link_to_key_id)
+            .execute(connection)
+            .await?;
     }
+
+    Ok(())
 }
 
-pub fn create_abouts_indices(connection: &Connection) -> Result<usize, Error> {
+pub async fn create_abouts_indices(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating abouts index");
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS abouts_raw_from_index on abouts_raw (link_from_key_id)",
-        (),
-    )?;
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS abouts_raw_key_index on abouts_raw (link_to_key_id)",
-        (),
-    )?;
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS abouts_raw_author_index on abouts_raw (link_to_author_id )",
-        (),
-    )
+    query("CREATE INDEX IF NOT EXISTS abouts_raw_from_index on abouts_raw (link_from_key_id)")
+        .execute(connection)
+        .await?;
+    query("CREATE INDEX IF NOT EXISTS abouts_raw_key_index on abouts_raw (link_to_key_id)")
+        .execute(connection)
+        .await?;
+    query("CREATE INDEX IF NOT EXISTS abouts_raw_author_index on abouts_raw (link_to_author_id )")
+        .execute(connection)
+        .await?;
+    Ok(())
 }
 
-pub fn create_abouts_views(connection: &Connection) -> Result<usize, Error> {
+pub async fn create_abouts_views(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating abouts views");
     //resolve all the links, get the content of the message.
-    connection.execute(
+    query(
         "
         CREATE VIEW IF NOT EXISTS abouts AS
         SELECT 
@@ -83,6 +87,8 @@ pub fn create_abouts_views(connection: &Connection) -> Result<usize, Error> {
         LEFT JOIN keys AS keys_to ON keys_to.id=abouts_raw.link_to_key_id
         LEFT JOIN authors AS authors_to ON authors_to.id=abouts_raw.link_to_author_id
         ",
-        (),
     )
+    .execute(connection)
+    .await;
+    Ok(())
 }

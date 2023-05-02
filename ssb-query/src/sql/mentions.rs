@@ -1,9 +1,9 @@
 use log::trace;
-use rusqlite::{Connection, Error};
+use sqlx::{query, Error, SqliteConnection};
 
 use crate::sql::*;
 
-pub fn create_mentions_tables(connection: &Connection) -> Result<usize, Error> {
+pub fn create_mentions_tables(connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating mentions tables");
 
     connection.execute(
@@ -16,7 +16,7 @@ pub fn create_mentions_tables(connection: &Connection) -> Result<usize, Error> {
     )
 }
 
-pub fn insert_mentions(connection: &Connection, links: &[&serde_json::Value], message_key_id: i64) {
+pub fn insert_mentions(connection: &mut SqliteConnection, links: &[&serde_json::Value], message_key_id: i64) {
     let mut insert_link_stmt = connection
         .prepare_cached(
             "INSERT INTO mentions_raw (link_from_key_id, link_to_author_id) VALUES (?, ?)",
@@ -28,7 +28,7 @@ pub fn insert_mentions(connection: &Connection, links: &[&serde_json::Value], me
         .filter(|link| link.is_string())
         .map(|link| link.as_str().unwrap())
         .filter(|link| link.starts_with('@'))
-        .map(|link| find_or_create_key(&connection, link).unwrap())
+        .map(|link| find_or_create_key(&mut SqliteConnection, link).unwrap())
         .for_each(|link_id| {
             insert_link_stmt
                 .execute(&[&message_key_id, &link_id])
@@ -36,7 +36,7 @@ pub fn insert_mentions(connection: &Connection, links: &[&serde_json::Value], me
         });
 }
 
-pub fn create_mentions_views(connection: &Connection) -> Result<usize, Error> {
+pub fn create_mentions_views(connection: &mut SqliteConnection) -> Result<usize, Error> {
     connection.execute(
         "
         CREATE VIEW IF NOT EXISTS mentions AS
@@ -55,11 +55,11 @@ pub fn create_mentions_views(connection: &Connection) -> Result<usize, Error> {
         (),
     )
 }
-pub fn create_mentions_indices(connection: &Connection) -> Result<usize, Error> {
+pub fn create_mentions_indices(connection: &mut SqliteConnection) -> Result<usize, Error> {
     create_mentions_to_index(connection)
 }
 
-fn create_mentions_to_index(conn: &Connection) -> Result<usize, Error> {
+fn create_mentions_to_index(conn: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating mentions index");
     conn.execute(
         "CREATE INDEX IF NOT EXISTS mentions_id_to_index on mentions_raw (link_to_author_id, link_from_key_id)",

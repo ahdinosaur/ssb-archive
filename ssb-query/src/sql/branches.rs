@@ -1,10 +1,10 @@
 use log::trace;
-use rusqlite::{Connection, Error};
+use sqlx::{query, Error, SqliteConnection};
 use serde_json::Value;
 
 use crate::sql::*;
 
-pub fn insert_branches(connection: &Connection, message: &SsbMessage, message_key_id: i64) {
+pub fn insert_branches(connection: &mut SqliteConnection, message: &SsbMessage, message_key_id: i64) {
     if let Some(branches_value) = message.value.content.get("branch") {
         let mut insert_branch_stmt = connection
             .prepare_cached(
@@ -32,7 +32,7 @@ pub fn insert_branches(connection: &Connection, message: &SsbMessage, message_ke
     }
 }
 
-pub fn create_branches_tables(connection: &Connection) -> Result<usize, Error> {
+pub fn create_branches_tables(connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating branches tables");
 
     connection.execute(
@@ -45,7 +45,7 @@ pub fn create_branches_tables(connection: &Connection) -> Result<usize, Error> {
     )
 }
 
-pub fn create_branches_indices(_connection: &Connection) -> Result<usize, Error> {
+pub fn create_branches_indices(_connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating branches tables");
     Ok(0)
 }

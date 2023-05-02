@@ -1,12 +1,12 @@
 use log::trace;
 use rusqlite::types::ToSql;
-use rusqlite::{Connection, Error};
+use sqlx::{query, Error, SqliteConnection};
 use serde_json::Value;
 
 use crate::sql::*;
 
 pub fn insert_message(
-    connection: &Connection,
+    connection: &mut SqliteConnection,
     message: &SsbMessage,
     seq: i64,
     message_key_id: i64,
@@ -18,7 +18,7 @@ pub fn insert_message(
     trace!("get root key id");
     let root_key_id = match message.value.content["root"] {
         Value::String(ref key) => {
-            let id = find_or_create_key(&connection, &key).unwrap();
+            let id = find_or_create_key(&mut SqliteConnection, &key).unwrap();
             Some(id)
         }
         _ => None,
@@ -27,14 +27,14 @@ pub fn insert_message(
     trace!("get fork key id");
     let fork_key_id = match message.value.content["fork"] {
         Value::String(ref key) => {
-            let id = find_or_create_key(&connection, &key).unwrap();
+            let id = find_or_create_key(&mut SqliteConnection, &key).unwrap();
             Some(id)
         }
         _ => None,
     };
 
     trace!("find or create author");
-    let author_id = find_or_create_author(&connection, &message.value.author)?;
+    let author_id = find_or_create_author(&mut SqliteConnection, &message.value.author)?;
 
     trace!("insert message");
     insert_msg_stmt.execute(&[
@@ -52,7 +52,7 @@ pub fn insert_message(
     ])
 }
 
-pub fn create_messages_tables(connection: &Connection) -> Result<usize, Error> {
+pub fn create_messages_tables(connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating messages tables");
     connection.execute(
         "CREATE TABLE IF NOT EXISTS messages_raw (
@@ -72,7 +72,7 @@ pub fn create_messages_tables(connection: &Connection) -> Result<usize, Error> {
     )
 }
 
-pub fn create_messages_views(connection: &Connection) -> Result<usize, Error> {
+pub fn create_messages_views(connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating messages views");
     connection.execute(
         "
@@ -103,16 +103,16 @@ pub fn create_messages_views(connection: &Connection) -> Result<usize, Error> {
     )
 }
 
-pub fn create_messages_indices(connection: &Connection) -> Result<(), Error> {
+pub fn create_messages_indices(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating messages indices");
-    create_content_type_index(&connection)?;
-    create_root_index(&connection)?;
-    create_fork_index(&connection)?;
+    create_content_type_index(&mut SqliteConnection)?;
+    create_root_index(&mut SqliteConnection)?;
+    create_fork_index(&mut SqliteConnection)?;
     create_author_index(connection)?;
     Ok(())
 }
 
-fn create_author_index(connection: &Connection) -> Result<usize, Error> {
+fn create_author_index(connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating author index");
     connection.execute(
         "CREATE INDEX IF NOT EXISTS author_id_index on messages_raw (author_id)",
@@ -120,7 +120,7 @@ fn create_author_index(connection: &Connection) -> Result<usize, Error> {
     )
 }
 
-fn create_root_index(connection: &Connection) -> Result<usize, Error> {
+fn create_root_index(connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating root index");
     connection.execute(
         "CREATE INDEX IF NOT EXISTS root_id_index on messages_raw (root_id)",
@@ -128,7 +128,7 @@ fn create_root_index(connection: &Connection) -> Result<usize, Error> {
     )
 }
 
-fn create_fork_index(connection: &Connection) -> Result<usize, Error> {
+fn create_fork_index(connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating root index");
     connection.execute(
         "CREATE INDEX IF NOT EXISTS fork_id_index on messages_raw (fork_id)",
@@ -136,7 +136,7 @@ fn create_fork_index(connection: &Connection) -> Result<usize, Error> {
     )
 }
 
-fn create_content_type_index(connection: &Connection) -> Result<usize, Error> {
+fn create_content_type_index(connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating content type index");
     connection.execute(
         "CREATE INDEX IF NOT EXISTS content_type_index on messages_raw (content_type)",

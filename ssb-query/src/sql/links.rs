@@ -1,9 +1,9 @@
 use log::trace;
-use rusqlite::{Connection, Error};
+use sqlx::{query, Error, SqliteConnection};
 
 use crate::sql::*;
 
-pub fn create_links_tables(connection: &Connection) -> Result<usize, Error> {
+pub fn create_links_tables(connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating links tables");
 
     connection.execute(
@@ -16,7 +16,7 @@ pub fn create_links_tables(connection: &Connection) -> Result<usize, Error> {
     )
 }
 
-pub fn create_links_views(connection: &Connection) -> Result<usize, Error> {
+pub fn create_links_views(connection: &mut SqliteConnection) -> Result<usize, Error> {
     connection.execute(
         "
         CREATE VIEW IF NOT EXISTS links AS
@@ -34,7 +34,7 @@ pub fn create_links_views(connection: &Connection) -> Result<usize, Error> {
     )
 }
 
-pub fn insert_links(connection: &Connection, links: &[&serde_json::Value], message_key_id: i64) {
+pub fn insert_links(connection: &mut SqliteConnection, links: &[&serde_json::Value], message_key_id: i64) {
     let mut insert_link_stmt = connection
         .prepare_cached("INSERT INTO links_raw (link_from_key_id, link_to_key_id) VALUES (?, ?)")
         .unwrap();
@@ -44,7 +44,7 @@ pub fn insert_links(connection: &Connection, links: &[&serde_json::Value], messa
         .filter(|link| link.is_string())
         .map(|link| link.as_str().unwrap())
         .filter(|link| link.starts_with('%'))
-        .map(|link| find_or_create_key(&connection, link).unwrap())
+        .map(|link| find_or_create_key(&mut SqliteConnection, link).unwrap())
         .for_each(|link_id| {
             insert_link_stmt
                 .execute(&[&message_key_id, &link_id])
@@ -52,11 +52,11 @@ pub fn insert_links(connection: &Connection, links: &[&serde_json::Value], messa
         });
 }
 
-pub fn create_links_indices(connection: &Connection) -> Result<usize, Error> {
+pub fn create_links_indices(connection: &mut SqliteConnection) -> Result<usize, Error> {
     create_links_to_index(connection)
 }
 
-fn create_links_to_index(conn: &Connection) -> Result<usize, Error> {
+fn create_links_to_index(conn: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating links index");
     conn.execute(
         "CREATE INDEX IF NOT EXISTS links_to_id_index on links_raw (link_to_key_id, link_from_key_id)",

@@ -1,7 +1,7 @@
 use log::trace;
-use rusqlite::{Connection, Error};
+use sqlx::{query, Error, SqliteConnection};
 
-pub fn find_or_create_key(connection: &Connection, key: &str) -> Result<i64, Error> {
+pub fn find_or_create_key(connection: &mut SqliteConnection, key: &str) -> Result<i64, Error> {
     let mut stmt = connection.prepare_cached("SELECT id FROM keys WHERE key=?1")?;
 
     stmt.query_row(&[key], |row| row.get(0)).or_else(|_| {
@@ -12,7 +12,7 @@ pub fn find_or_create_key(connection: &Connection, key: &str) -> Result<i64, Err
     })
 }
 
-pub fn create_keys_tables(connection: &Connection) -> Result<usize, Error> {
+pub fn create_keys_tables(connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating messages tables");
     connection.execute(
         "CREATE TABLE IF NOT EXISTS keys (
@@ -23,6 +23,6 @@ pub fn create_keys_tables(connection: &Connection) -> Result<usize, Error> {
     )
 }
 
-pub fn create_keys_indices(_connection: &Connection) -> Result<usize, Error> {
+pub fn create_keys_indices(_connection: &mut SqliteConnection) -> Result<usize, Error> {
     Ok(0)
 }

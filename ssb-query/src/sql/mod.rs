@@ -2,10 +2,13 @@ use base64::engine::{general_purpose::STANDARD as b64, Engine};
 use flumedb::flume_view::{FlumeView, Sequence};
 use log::{info, trace};
 use private_box::Keypair;
-use rusqlite::types::ToSql;
-use rusqlite::{Connection, Error as SqlError, OpenFlags};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
+use sqlx::{
+    query,
+    sqlite::{SqliteConnection, SqliteRow},
+    Connection, Error as SqlError, Row,
+};
 use thiserror::Error as ThisError;
 
 mod abouts;
@@ -60,50 +63,37 @@ pub enum SqlViewError {
 }
 
 pub struct SqlView {
-    pub connection: Connection,
+    pub connection: SqliteConnection,
     secret_keys: Vec<Keypair>,
 }
 
-impl FlumeView for SqlView {
-    fn append(&mut self, seq: Sequence, item: &[u8]) {
-        append_item(&self.connection, &self.secret_keys, seq, item).unwrap()
-    }
-    fn latest(&self) -> Sequence {
-        self.get_latest().unwrap().unwrap_or(0)
-    }
-}
-
-fn create_connection(path: &str) -> Result<Connection, SqlError> {
-    let flags: OpenFlags = OpenFlags::SQLITE_OPEN_READ_WRITE
-        | OpenFlags::SQLITE_OPEN_CREATE
-        | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-
-    Connection::open_with_flags(path, flags)
+async fn create_connection(path: &str) -> Result<SqliteConnection, SqlError> {
+    SqliteConnection::connect(path).await
 }
 
 impl SqlView {
-    pub fn new(
+    pub async fn new(
         path: &str,
         secret_keys: Vec<Keypair>,
         pub_key: &str,
     ) -> Result<SqlView, SqlViewError> {
-        let mut connection = create_connection(path)?;
+        let mut connection = create_connection(path).await?;
 
-        if let Ok(false) = is_db_up_to_date(&connection) {
+        if let Ok(false) = is_db_up_to_date(&mut connection).await {
             info!("sqlite db is out of date. Deleting db and it will be rebuilt.");
             std::fs::remove_file(path).unwrap();
 
-            connection = create_connection(path)?;
+            connection = create_connection(path).await?;
 
-            create_tables(&connection)?;
-            create_indices(&connection)?;
-            create_views(&connection)?;
+            create_tables(&mut connection)?;
+            create_indices(&mut connection)?;
+            create_views(&mut connection)?;
 
-            set_db_version(&connection)?;
-            set_author_that_is_me(&connection, pub_key)?;
+            set_db_version(&mut connection)?;
+            set_author_that_is_me(&mut connection, pub_key)?;
         }
 
-        set_pragmas(&connection);
+        set_pragmas(&mut connection);
 
         Ok(SqlView {
             connection,
@@ -111,67 +101,47 @@ impl SqlView {
         })
     }
 
-    pub fn get_seq_by_key(&mut self, key: &str) -> Result<i64, SqlViewError> {
-        let mut stmt = self
-            .connection
-            .prepare("SELECT flume_seq FROM messages_raw JOIN keys ON messages_raw.key_id=keys.id WHERE keys.key=?1")?;
+    pub async fn get_seq_by_key(&mut self, key: &str) -> Result<i64, SqlViewError> {
+        let result: i64 = query("SELECT flume_seq FROM messages_raw JOIN keys ON messages_raw.key_id=keys.id WHERE keys.key=?1")
+            .bind(key)
+            .map(|row: SqliteRow| row.get(0))
+            .fetch_one(&mut self.connection).await?;
 
-        Ok(stmt.query_row(&[key], |row| Ok(row.get(0)?))?)
+        Ok(result)
     }
 
-    pub fn get_seqs_by_type(&mut self, content_type: &str) -> Result<Vec<i64>, SqlViewError> {
-        let mut stmt = self
-            .connection
-            .prepare("SELECT flume_seq FROM messages_raw WHERE content_type=?1")?;
-
-        let rows = stmt.query_map(&[content_type], |row| row.get(0))?;
-
-        let seqs = rows.fold(Vec::<i64>::new(), |mut vec, row| {
-            vec.push(row.unwrap());
-            vec
-        });
-
-        Ok(seqs)
-    }
-
-    pub fn get_seqs_by_author(&mut self, author: &str) -> Result<Vec<i64>, SqlViewError> {
-        let mut stmt = self
-            .connection
-            .prepare("SELECT flume_seq FROM messages_raw JOIN authors ON messages_raw.author_id=authors.id WHERE author=?1")?;
-
-        let rows = stmt.query_map(&[author], |row| row.get(0))?;
-
-        let seqs = rows.fold(Vec::<i64>::new(), |mut vec, row| {
-            vec.push(row.unwrap());
-            vec
-        });
-
-        Ok(seqs)
-    }
-
-    pub fn append_batch(&mut self, items: &[(Sequence, Vec<u8>)]) {
+    pub async fn append_batch(
+        &mut self,
+        items: &[(Sequence, Vec<u8>)],
+    ) -> Result<(), SqlViewError> {
         trace!("Start batch append");
-        let tx = self.connection.transaction().unwrap();
 
-        for item in items {
-            append_item(&tx, &self.secret_keys, item.0, &item.1).unwrap();
-        }
+        let secret_keys = &self.secret_keys;
+        self.connection
+            .transaction::<_, _, SqlError>(|mut conn| {
+                Box::pin(async move {
+                    for item in items {
+                        append_item(&mut conn, secret_keys, &item.0, &item.1).await?;
+                    }
+                    Ok(())
+                })
+            })
+            .await;
 
-        tx.commit().unwrap();
+        Ok(())
     }
 
-    pub fn check_db_integrity(&mut self) -> Result<(), SqlViewError> {
-        self.connection
-            .query_row_and_then("PRAGMA integrity_check", (), |row| {
-                row.get(0)
-                    .map_err(|err| err.into())
-                    .and_then(|res: String| {
-                        if res == "ok" {
-                            return Ok(());
-                        }
-                        Err(SqlViewError::DbFailedIntegrityCheck {}.into())
-                    })
-            })
+    pub async fn check_db_integrity(&mut self) -> Result<(), SqlViewError> {
+        let res: String = query("PRAGMA integrity_check")
+            .map(|row: SqliteRow| -> String { row.get(0) })
+            .fetch_one(&mut self.connection)
+            .await?;
+
+        if res == "ok" {
+            Ok(())
+        } else {
+            Err(SqlViewError::DbFailedIntegrityCheck {}.into())
+        }
     }
 
     pub fn get_latest(&self) -> Result<Option<Sequence>, SqlViewError> {
@@ -249,17 +219,17 @@ fn attempt_decryption(mut message: SsbMessage, secret_keys: &[Keypair]) -> (bool
     (is_decrypted, message)
 }
 
-fn append_item(
-    connection: &Connection,
+async fn append_item(
+    connection: &mut SqliteConnection,
     secret_keys: &[Keypair],
-    seq: Sequence,
+    seq: &Sequence,
     item: &[u8],
 ) -> Result<(), SqlError> {
     let message: SsbMessage = serde_json::from_slice(item).unwrap();
 
     let (is_decrypted, message) = attempt_decryption(message, secret_keys);
 
-    let message_key_id = find_or_create_key(&connection, &message.key).unwrap();
+    let message_key_id = find_or_create_key(&mut SqliteConnection, &message.key).unwrap();
 
     // votes are a kind of backlink, but we want to put them in their own table.
     match &message.value.content["type"] {
@@ -289,12 +259,12 @@ fn append_item(
     Ok(())
 }
 
-fn set_pragmas(connection: &Connection) {
+fn set_pragmas(connection: &mut SqliteConnection) {
     connection.execute("PRAGMA synchronous = OFF", ()).unwrap();
     connection.execute("PRAGMA page_size = 4096", ()).unwrap();
 }
 
-fn create_tables(connection: &Connection) -> Result<(), SqlError> {
+fn create_tables(connection: &mut SqliteConnection) -> Result<(), SqlError> {
     create_migrations_tables(connection)?;
     create_messages_tables(connection)?;
     create_authors_tables(connection)?;
@@ -311,7 +281,7 @@ fn create_tables(connection: &Connection) -> Result<(), SqlError> {
     Ok(())
 }
 
-fn create_views(connection: &Connection) -> Result<(), SqlError> {
+fn create_views(connection: &mut SqliteConnection) -> Result<(), SqlError> {
     create_messages_views(connection)?;
     create_links_views(connection)?;
     create_blob_links_views(connection)?;
@@ -321,7 +291,7 @@ fn create_views(connection: &Connection) -> Result<(), SqlError> {
     Ok(())
 }
 
-fn create_indices(connection: &Connection) -> Result<(), SqlError> {
+fn create_indices(connection: &mut SqliteConnection) -> Result<(), SqlError> {
     create_messages_indices(connection)?;
     create_links_indices(connection)?;
     create_blob_links_indices(connection)?;

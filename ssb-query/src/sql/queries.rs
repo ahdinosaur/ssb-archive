@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, Error};
 
 use crate::sql::*;
 
-pub fn select_max_seq_by_feed<'a>(connection: &Connection, feed_id: &'a str) -> Result<i64, Error> {
+pub fn select_max_seq_by_feed<'a>(connection: &mut SqliteConnection, feed_id: &'a str) -> Result<i64, Error> {
     let mut stmt = connection.prepare_cached(
         "
         SELECT
@@ -28,7 +28,7 @@ pub struct SelectAllMessagesByFeedOptions<'a> {
 }
 
 pub fn select_all_messages_by_feed<'a>(
-    connection: &Connection,
+    connection: &mut SqliteConnection,
     options: SelectAllMessagesByFeedOptions<'a>,
 ) -> Result<Vec<SsbMessage>, Error> {
     let mut stmt = connection.prepare_cached(
@@ -118,7 +118,7 @@ pub enum Link {
     },
 }
 
-pub fn select_out_links_by_message(connection: &Connection, id: &str) -> Result<Vec<Link>, Error> {
+pub fn select_out_links_by_message(connection: &mut SqliteConnection, id: &str) -> Result<Vec<Link>, Error> {
     /*
         SELECT
             links.link_from_key as id,
@@ -160,7 +160,7 @@ pub fn select_out_links_by_message(connection: &Connection, id: &str) -> Result<
     rows.collect()
 }
 
-pub fn select_back_links_by_message(connection: &Connection, id: &str) -> Result<Vec<Link>, Error> {
+pub fn select_back_links_by_message(connection: &mut SqliteConnection, id: &str) -> Result<Vec<Link>, Error> {
     /*
         SELECT
             links.link_from_key as id,

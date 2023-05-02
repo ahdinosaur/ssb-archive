@@ -1,9 +1,9 @@
 use log::trace;
-use rusqlite::{Connection, Error};
+use sqlx::{query, Error, SqliteConnection};
 
 use crate::sql::*;
 
-pub fn create_votes_tables(connection: &Connection) -> Result<usize, Error> {
+pub fn create_votes_tables(connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating votes tables");
 
     connection.execute(
@@ -16,10 +16,10 @@ pub fn create_votes_tables(connection: &Connection) -> Result<usize, Error> {
     )
 }
 
-pub fn insert_or_update_votes(connection: &Connection, message: &SsbMessage) {
+pub fn insert_or_update_votes(connection: &mut SqliteConnection, message: &SsbMessage) {
     if let Value::Number(value) = &message.value.content["vote"]["value"] {
         if let Value::String(link) = &message.value.content["vote"]["link"] {
-            let author_id = find_or_create_author(&connection, &message.value.author).unwrap();
+            let author_id = find_or_create_author(&mut SqliteConnection, &message.value.author).unwrap();
             let link_to_key_id = find_or_create_key(connection, link).unwrap();
 
             if value.as_i64().unwrap() == 1 {
@@ -41,7 +41,7 @@ pub fn insert_or_update_votes(connection: &Connection, message: &SsbMessage) {
     }
 }
 
-pub fn create_votes_indices(connection: &Connection) -> Result<usize, Error> {
+pub fn create_votes_indices(connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating votes indices");
     connection.execute(
         "CREATE INDEX IF NOT EXISTS votes_raw_link_from_author_id_index on votes_raw (link_from_author_id)",

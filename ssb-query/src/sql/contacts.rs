@@ -1,10 +1,10 @@
 use log::trace;
-use rusqlite::{Connection, Error};
+use sqlx::{query, Error, SqliteConnection};
 use serde_json::Value;
 
 use crate::sql::*;
 
-pub fn create_contacts_tables(connection: &Connection) -> Result<usize, Error> {
+pub fn create_contacts_tables(connection: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating contacts tables");
     connection.execute(
         "
@@ -21,7 +21,7 @@ pub fn create_contacts_tables(connection: &Connection) -> Result<usize, Error> {
 }
 
 pub fn insert_or_update_contacts(
-    connection: &Connection,
+    connection: &mut SqliteConnection,
     message: &SsbMessage,
     _message_key_id: i64,
     is_decrypted: bool,
@@ -45,8 +45,8 @@ pub fn insert_or_update_contacts(
             0
         };
 
-        let author_id = find_or_create_author(&connection, &message.value.author).unwrap();
-        let contact_author_id = find_or_create_author(&connection, contact).unwrap();
+        let author_id = find_or_create_author(&mut SqliteConnection, &message.value.author).unwrap();
+        let contact_author_id = find_or_create_author(&mut SqliteConnection, contact).unwrap();
 
         let mut stmt = connection.prepare_cached("SELECT id FROM contacts_raw WHERE author_id = ? AND contact_author_id = ? AND is_decrypted = ?").unwrap();
 
@@ -68,11 +68,11 @@ pub fn insert_or_update_contacts(
     }
 }
 
-pub fn create_contacts_indices(connection: &Connection) -> Result<usize, Error> {
+pub fn create_contacts_indices(connection: &mut SqliteConnection) -> Result<usize, Error> {
     create_contacts_author_id_state_index(connection)
 }
 
-fn create_contacts_author_id_state_index(conn: &Connection) -> Result<usize, Error> {
+fn create_contacts_author_id_state_index(conn: &mut SqliteConnection) -> Result<usize, Error> {
     trace!("Creating contacts author_id index");
     conn.execute(
         "CREATE INDEX IF NOT EXISTS contacts_raw_contact_author_id_state_index on contacts_raw (contact_author_id)",
