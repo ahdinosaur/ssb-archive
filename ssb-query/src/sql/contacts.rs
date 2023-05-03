@@ -1,31 +1,33 @@
 use log::trace;
-use sqlx::{query, Error, SqliteConnection};
 use serde_json::Value;
+use sqlx::{query, Error, SqliteConnection};
 
 use crate::sql::*;
 
-pub fn create_contacts_tables(connection: &mut SqliteConnection) -> Result<usize, Error> {
+pub async fn create_contacts_tables(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating contacts tables");
-    connection.execute(
-        "
-    CREATE TABLE IF NOT EXISTS contacts_raw(
-        id INTEGER PRIMARY KEY,
-        author_id INTEGER,
-        contact_author_id INTEGER,
-        is_decrypted BOOLEAN,
-        state INTEGER
-    ) 
-    ",
-        (),
+
+    query(
+        "CREATE TABLE IF NOT EXISTS contacts_raw(
+            id INTEGER PRIMARY KEY,
+            author_id INTEGER,
+            contact_author_id INTEGER,
+            is_decrypted BOOLEAN,
+            state INTEGER
+        )",
     )
+    .execute(connection)
+    .await?;
+
+    Ok(())
 }
 
-pub fn insert_or_update_contacts(
+pub async fn insert_or_update_contacts(
     connection: &mut SqliteConnection,
     message: &SsbMessage,
     _message_key_id: i64,
     is_decrypted: bool,
-) {
+) -> Result<(), Error> {
     if let Value::String(contact) = &message.value.content["contact"] {
         //Ok what should this do:
         //  - if the record already exists
@@ -45,41 +47,59 @@ pub fn insert_or_update_contacts(
             0
         };
 
-        let author_id = find_or_create_author(&mut SqliteConnection, &message.value.author).unwrap();
-        let contact_author_id = find_or_create_author(&mut SqliteConnection, contact).unwrap();
+        let author_id = find_or_create_author(connection, &message.value.author).await?;
+        let contact_author_id = find_or_create_author(connection, contact).await?;
 
-        let mut stmt = connection.prepare_cached("SELECT id FROM contacts_raw WHERE author_id = ? AND contact_author_id = ? AND is_decrypted = ?").unwrap();
+        let row: Option<i64> = query(
+            "SELECT id FROM contacts_raw WHERE author_id = ? AND contact_author_id = ? AND is_decrypted = ?",
+        )
+        .bind(&author_id)
+        .bind(&contact_author_id)
+        .bind(is_decrypted)
+        .map(|row: sqlx::sqlite::SqliteRow| row.get(0))
+        .fetch_optional(&mut *connection)
+        .await?;
 
-        stmt.query_row(&[&author_id, &contact_author_id, &is_decrypted as &dyn ToSql], |row| row.get(0))
-            .and_then(|id: i64|{
-                //Row exists so update
-                connection
-                    .prepare_cached("UPDATE contacts_raw SET state = ? WHERE id = ?")
-                    .map(|mut stmt| stmt.execute(&[&state, &id]))
-            })
-            .or_else(|_| {
-                //Row didn't exist so insert
-                connection
-                    .prepare_cached("INSERT INTO contacts_raw (author_id, contact_author_id, is_decrypted, state) VALUES (?, ?, ?, ?)")
-                    .map(|mut stmt| stmt.execute(&[&author_id, &contact_author_id, &is_decrypted as &dyn ToSql, &state]))
-            })
-            .unwrap()
-            .unwrap();
+        if let Some(id) = row {
+            query("UPDATE contacts_raw SET state = ? WHERE id = ?")
+                .bind(state)
+                .bind(id)
+                .execute(connection)
+                .await?;
+        } else {
+            query(
+                "INSERT INTO contacts_raw (author_id, contact_author_id, is_decrypted, state) VALUES (?, ?, ?, ?)",
+            )
+            .bind(author_id)
+            .bind(contact_author_id)
+            .bind(is_decrypted)
+            .bind(state)
+            .execute(connection)
+            .await?;
+        }
     }
+
+    Ok(())
 }
 
-pub fn create_contacts_indices(connection: &mut SqliteConnection) -> Result<usize, Error> {
-    create_contacts_author_id_state_index(connection)
+pub async fn create_contacts_indices(connection: &mut SqliteConnection) -> Result<(), Error> {
+    create_contacts_author_id_state_index(connection).await
 }
 
-fn create_contacts_author_id_state_index(conn: &mut SqliteConnection) -> Result<usize, Error> {
+async fn create_contacts_author_id_state_index(conn: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating contacts author_id index");
-    conn.execute(
+
+    query(
         "CREATE INDEX IF NOT EXISTS contacts_raw_contact_author_id_state_index on contacts_raw (contact_author_id)",
-        (),
-    )?;
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS contacts_raw_author_id_state_index on contacts_raw (author_id, state)",
-        (),
     )
+    .execute(&mut *conn)
+    .await?;
+
+    query(
+        "CREATE INDEX IF NOT EXISTS contacts_raw_author_id_state_index on contacts_raw (author_id, state)",
+    )
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
 }

@@ -1,28 +1,43 @@
 use log::trace;
-use sqlx::{query, Error, SqliteConnection};
+use sqlx::{query, sqlite::SqliteRow, Error, Row, SqliteConnection};
 
-pub fn find_or_create_key(connection: &mut SqliteConnection, key: &str) -> Result<i64, Error> {
-    let mut stmt = connection.prepare_cached("SELECT id FROM keys WHERE key=?1")?;
+pub async fn find_or_create_key(
+    connection: &mut SqliteConnection,
+    key: &str,
+) -> Result<i64, Error> {
+    let result: Option<i64> = query("SELECT id FROM keys WHERE key=?1")
+        .bind(key)
+        .map(|row: SqliteRow| row.get(0))
+        .fetch_optional(&mut *connection)
+        .await?;
 
-    stmt.query_row(&[key], |row| row.get(0)).or_else(|_| {
-        connection
-            .prepare_cached("INSERT INTO keys (key) VALUES (?)")
-            .map(|mut stmt| stmt.execute(&[key]))
-            .map(|_| connection.last_insert_rowid())
-    })
+    if let Some(found_key) = result {
+        Ok(found_key)
+    } else {
+        let created_key = query("INSERT INTO keys (key) VALUES (?)")
+            .bind(key)
+            .execute(&mut *connection)
+            .await?;
+
+        Ok(created_key.last_insert_rowid())
+    }
 }
 
-pub fn create_keys_tables(connection: &mut SqliteConnection) -> Result<usize, Error> {
+pub async fn create_keys_tables(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating messages tables");
-    connection.execute(
+
+    query(
         "CREATE TABLE IF NOT EXISTS keys (
           id INTEGER PRIMARY KEY,
           key TEXT UNIQUE
         )",
-        (),
     )
+    .execute(connection)
+    .await?;
+
+    Ok(())
 }
 
-pub fn create_keys_indices(_connection: &mut SqliteConnection) -> Result<usize, Error> {
-    Ok(0)
+pub async fn create_keys_indices(_connection: &mut SqliteConnection) -> Result<(), Error> {
+    Ok(())
 }

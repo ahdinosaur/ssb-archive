@@ -54,13 +54,13 @@ pub async fn insert_abouts(
 pub async fn create_abouts_indices(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating abouts index");
     query("CREATE INDEX IF NOT EXISTS abouts_raw_from_index on abouts_raw (link_from_key_id)")
-        .execute(connection)
+        .execute(&mut *connection)
         .await?;
     query("CREATE INDEX IF NOT EXISTS abouts_raw_key_index on abouts_raw (link_to_key_id)")
-        .execute(connection)
+        .execute(&mut *connection)
         .await?;
     query("CREATE INDEX IF NOT EXISTS abouts_raw_author_index on abouts_raw (link_to_author_id )")
-        .execute(connection)
+        .execute(&mut *connection)
         .await?;
     Ok(())
 }

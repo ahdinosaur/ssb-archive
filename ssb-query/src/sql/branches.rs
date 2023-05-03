@@ -1,17 +1,15 @@
 use log::trace;
-use sqlx::{query, Error, SqliteConnection};
 use serde_json::Value;
+use sqlx::{query, Error, SqliteConnection};
 
 use crate::sql::*;
 
-pub fn insert_branches(connection: &mut SqliteConnection, message: &SsbMessage, message_key_id: i64) {
+pub async fn insert_branches(
+    connection: &mut SqliteConnection,
+    message: &SsbMessage,
+    message_key_id: i64,
+) -> Result<(), Error> {
     if let Some(branches_value) = message.value.content.get("branch") {
-        let mut insert_branch_stmt = connection
-            .prepare_cached(
-                "INSERT INTO branches_raw (link_from_key_id, link_to_key_id) VALUES (?, ?)",
-            )
-            .unwrap();
-
         let branches = match branches_value {
             Value::Array(arr) => arr
                 .iter()
@@ -21,31 +19,37 @@ pub fn insert_branches(connection: &mut SqliteConnection, message: &SsbMessage, 
             _ => Vec::new(),
         };
 
-        branches
-            .iter()
-            .map(|branch| find_or_create_key(connection, branch).unwrap())
-            .for_each(|link_to_key_id| {
-                insert_branch_stmt
-                    .execute(&[&message_key_id, &link_to_key_id])
-                    .unwrap();
-            })
+        for branch in branches.iter() {
+            let link_to_key_id = find_or_create_key(&mut *connection, branch).await?;
+            query("INSERT INTO branches_raw (link_from_key_id, link_to_key_id) VALUES (?, ?)")
+                .bind(&message_key_id)
+                .bind(&link_to_key_id)
+                .execute(&mut *connection)
+                .await?;
+        }
     }
+
+    Ok(())
 }
 
-pub fn create_branches_tables(connection: &mut SqliteConnection) -> Result<usize, Error> {
+pub async fn create_branches_tables(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating branches tables");
 
-    connection.execute(
+    query(
         "CREATE TABLE IF NOT EXISTS branches_raw (
           id INTEGER PRIMARY KEY,
           link_from_key_id INTEGER,
           link_to_key_id INTEGER
         )",
-        (),
     )
+    .execute(connection)
+    .await?;
+
+    Ok(())
 }
 
-pub fn create_branches_indices(_connection: &mut SqliteConnection) -> Result<usize, Error> {
+pub async fn create_branches_indices(_connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating branches tables");
-    Ok(0)
+
+    Ok(())
 }

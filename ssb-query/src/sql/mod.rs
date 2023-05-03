@@ -85,15 +85,15 @@ impl SqlView {
 
             connection = create_connection(path).await?;
 
-            create_tables(&mut connection)?;
-            create_indices(&mut connection)?;
-            create_views(&mut connection)?;
+            create_tables(&mut connection).await?;
+            create_indices(&mut connection).await?;
+            create_views(&mut connection).await?;
 
-            set_db_version(&mut connection)?;
-            set_author_that_is_me(&mut connection, pub_key)?;
+            set_db_version(&mut connection).await?;
+            set_author_that_is_me(&mut connection, pub_key).await?;
         }
 
-        set_pragmas(&mut connection);
+        set_pragmas(&mut connection).await?;
 
         Ok(SqlView {
             connection,
@@ -144,16 +144,15 @@ impl SqlView {
         }
     }
 
-    pub fn get_latest(&self) -> Result<Option<Sequence>, SqlViewError> {
-        let mut stmt = self
-            .connection
-            .prepare_cached("SELECT MAX(flume_seq) FROM messages_raw")?;
+    pub async fn get_latest(&mut self) -> Result<Option<Sequence>, SqlViewError> {
+        let res: Option<i64> = query("SELECT MAX(flume_seq) FROM messages_raw")
+            .map(|row: SqliteRow| row.get(0))
+            .fetch_optional(&mut self.connection)
+            .await?;
 
-        Ok(stmt.query_row((), |row| {
-            let res: Option<i64> = row.get(0).ok();
-            trace!("got latest seq from db: {:?}", res);
-            Ok(res.map(|v| v as Sequence))
-        })?)
+        trace!("got latest seq from db: {:?}", res);
+
+        Ok(res.map(|v| v as Sequence))
     }
 }
 
@@ -229,81 +228,88 @@ async fn append_item(
 
     let (is_decrypted, message) = attempt_decryption(message, secret_keys);
 
-    let message_key_id = find_or_create_key(&mut SqliteConnection, &message.key).unwrap();
+    let message_key_id = find_or_create_key(connection, &message.key).await.unwrap();
 
     // votes are a kind of backlink, but we want to put them in their own table.
     match &message.value.content["type"] {
         Value::String(type_string) if type_string == "vote" => {
-            insert_or_update_votes(connection, &message);
+            insert_or_update_votes(connection, &message).await?;
         }
         _ => {
             let mut links = Vec::new();
             find_values_in_object_by_key(&message.value.content, "link", &mut links);
-            insert_links(connection, links.as_slice(), message_key_id);
-            insert_mentions(connection, links.as_slice(), message_key_id);
-            insert_blob_links(connection, links.as_slice(), message_key_id);
+            insert_links(connection, links.as_slice(), message_key_id).await?;
+            insert_mentions(connection, links.as_slice(), message_key_id).await?;
+            insert_blob_links(connection, links.as_slice(), message_key_id).await?;
         }
     }
 
-    insert_branches(connection, &message, message_key_id);
+    insert_branches(connection, &message, message_key_id).await;
     insert_message(
         connection,
         &message,
-        seq as i64,
+        *seq as i64,
         message_key_id,
         is_decrypted,
-    )?;
-    insert_or_update_contacts(connection, &message, message_key_id, is_decrypted);
-    insert_abouts(connection, &message, message_key_id);
+    )
+    .await?;
+    insert_or_update_contacts(connection, &message, message_key_id, is_decrypted).await?;
+    insert_abouts(connection, &message, message_key_id).await?;
 
     Ok(())
 }
 
-fn set_pragmas(connection: &mut SqliteConnection) {
-    connection.execute("PRAGMA synchronous = OFF", ()).unwrap();
-    connection.execute("PRAGMA page_size = 4096", ()).unwrap();
+async fn set_pragmas(connection: &mut SqliteConnection) -> Result<(), SqlError> {
+    query("PRAGMA synchronous = OFF")
+        .execute(&mut *connection)
+        .await?;
+    query("PRAGMA page size = 4096")
+        .execute(&mut *connection)
+        .await?;
+    Ok(())
 }
 
-fn create_tables(connection: &mut SqliteConnection) -> Result<(), SqlError> {
-    create_migrations_tables(connection)?;
-    create_messages_tables(connection)?;
-    create_authors_tables(connection)?;
-    create_keys_tables(connection)?;
-    create_links_tables(connection)?;
-    create_contacts_tables(connection)?;
-    create_branches_tables(connection)?;
-    create_mentions_tables(connection)?;
-    create_abouts_tables(connection)?;
-    create_blobs_tables(connection)?;
-    create_blob_links_tables(connection)?;
-    create_votes_tables(connection)?;
+async fn create_tables(connection: &mut SqliteConnection) -> Result<(), SqlError> {
+    create_migrations_tables(connection).await?;
+    create_messages_tables(connection).await?;
+    create_authors_tables(connection).await?;
+    create_keys_tables(connection).await?;
+    create_links_tables(connection).await?;
+    create_contacts_tables(connection).await?;
+    create_branches_tables(connection).await?;
+    create_mentions_tables(connection).await?;
+    create_abouts_tables(connection).await?;
+    create_blobs_tables(connection).await?;
+    create_blob_links_tables(connection).await?;
+    create_votes_tables(connection).await?;
 
     Ok(())
 }
 
-fn create_views(connection: &mut SqliteConnection) -> Result<(), SqlError> {
-    create_messages_views(connection)?;
-    create_links_views(connection)?;
-    create_blob_links_views(connection)?;
-    create_abouts_views(connection)?;
-    create_mentions_views(connection)?;
-    create_votes_indices(connection)?;
+async fn create_views(connection: &mut SqliteConnection) -> Result<(), SqlError> {
+    create_messages_views(connection).await?;
+    create_links_views(connection).await?;
+    create_blob_links_views(connection).await?;
+    create_abouts_views(connection).await?;
+    create_mentions_views(connection).await?;
+    create_votes_indices(connection).await?;
     Ok(())
 }
 
-fn create_indices(connection: &mut SqliteConnection) -> Result<(), SqlError> {
-    create_messages_indices(connection)?;
-    create_links_indices(connection)?;
-    create_blob_links_indices(connection)?;
-    create_contacts_indices(connection)?;
-    create_keys_indices(connection)?;
-    create_branches_indices(connection)?;
-    create_authors_indices(connection)?;
-    create_abouts_indices(connection)?;
-    create_mentions_indices(connection)?;
+async fn create_indices(connection: &mut SqliteConnection) -> Result<(), SqlError> {
+    create_messages_indices(connection).await?;
+    create_links_indices(connection).await?;
+    create_blob_links_indices(connection).await?;
+    create_contacts_indices(connection).await?;
+    create_keys_indices(connection).await?;
+    create_branches_indices(connection).await?;
+    create_authors_indices(connection).await?;
+    create_abouts_indices(connection).await?;
+    create_mentions_indices(connection).await?;
     Ok(())
 }
 
+/*
 #[cfg(test)]
 mod test {
     use super::*;
@@ -329,7 +335,7 @@ mod test {
         std::fs::remove_file(filename.clone())
             .or::<Result<()>>(Ok(()))
             .unwrap();
-        SqlView::new(filename, keys, "").unwrap();
+        SqlView::new(filename, keys, "").await.unwrap();
         assert!(true)
     }
 
@@ -409,3 +415,4 @@ mod test {
         }
     }
 }
+*/

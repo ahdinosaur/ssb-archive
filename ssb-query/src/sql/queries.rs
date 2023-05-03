@@ -1,21 +1,27 @@
-use rusqlite::{params, Connection, Error};
-
 use crate::sql::*;
+use crate::SsbMessage;
+use sqlx::{query, Error, Row, SqliteConnection};
 
-pub fn select_max_seq_by_feed<'a>(connection: &mut SqliteConnection, feed_id: &'a str) -> Result<i64, Error> {
-    let mut stmt = connection.prepare_cached(
+pub async fn select_max_seq_by_feed<'a>(
+    connection: &mut SqliteConnection,
+    feed_id: &'a str,
+) -> Result<i64, Error> {
+    let max_seq: i64 = query(
         "
         SELECT
           MAX(seq)
         FROM messages_raw
         JOIN authors ON authors.id = messages_raw.author_id
         WHERE
-            authors.author = ?1
+            authors.author = ?
         LIMIT 1
         ",
-    )?;
+    )
+    .bind(feed_id)
+    .fetch_one(connection)
+    .await?
+    .get(0);
 
-    let max_seq: i64 = stmt.query_row(params![feed_id], |row| Ok(row.get::<usize, i64>(0)?))?;
     Ok(max_seq)
 }
 
@@ -27,11 +33,11 @@ pub struct SelectAllMessagesByFeedOptions<'a> {
     pub is_decrypted: bool,
 }
 
-pub fn select_all_messages_by_feed<'a>(
+pub async fn select_all_messages_by_feed<'a>(
     connection: &mut SqliteConnection,
     options: SelectAllMessagesByFeedOptions<'a>,
 ) -> Result<Vec<SsbMessage>, Error> {
-    let mut stmt = connection.prepare_cached(
+    let rows = query(
         "
         SELECT
             seq,
@@ -45,38 +51,39 @@ pub fn select_all_messages_by_feed<'a>(
         JOIN keys ON keys.id = messages_raw.key_id
         JOIN authors ON authors.id = messages_raw.author_id
         WHERE
-            authors.author = ?1
-            AND content_type = ?2
-            AND seq < ?3
-            AND is_decrypted = ?4
+            authors.author = ?
+            AND content_type = ?
+            AND seq < ?
+            AND is_decrypted = ?
         ORDER BY seq DESC
-        LIMIT ?5
+        LIMIT ?
         ",
-    )?;
+    )
+    .bind(options.feed_id)
+    .bind(options.content_type)
+    .bind(options.less_than_seq)
+    .bind(options.is_decrypted)
+    .bind(options.page_size)
+    .fetch_all(connection)
+    .await?;
 
-    let rows = stmt.query_map(
-        params![
-            options.feed_id,
-            options.content_type,
-            options.less_than_seq,
-            options.is_decrypted,
-            options.page_size,
-        ],
-        |row| {
+    let messages = rows
+        .into_iter()
+        .map(|row| {
             Ok(SsbMessage {
-                key: row.get(1)?,
+                key: row.get(1),
                 value: SsbValue {
-                    author: row.get(2)?,
-                    sequence: row.get(0)?,
-                    timestamp: row.get(4)?,
-                    content: row.get(5)?,
+                    author: row.get(2),
+                    sequence: row.get(0),
+                    timestamp: row.get(4),
+                    content: row.get(5),
                 },
-                timestamp: row.get(3)?,
+                timestamp: row.get(3),
             })
-        },
-    )?;
+        })
+        .collect::<Result<Vec<SsbMessage>, Error>>()?;
 
-    rows.collect()
+    Ok(messages)
 }
 // select all posts by a user
 //   - greater than seq
@@ -118,7 +125,10 @@ pub enum Link {
     },
 }
 
-pub fn select_out_links_by_message(connection: &mut SqliteConnection, id: &str) -> Result<Vec<Link>, Error> {
+pub async fn select_out_links_by_message(
+    connection: &mut SqliteConnection,
+    id: &str,
+) -> Result<Vec<Link>, Error> {
     /*
         SELECT
             links.link_from_key as id,
@@ -132,7 +142,7 @@ pub fn select_out_links_by_message(connection: &mut SqliteConnection, id: &str) 
         AND NOT content_type = 'vote'
         AND NOT content_type = 'tag'
     */
-    let mut stmt = connection.prepare_cached(
+    let rows = query(
         "
         SELECT
                 links.link_to_key as id,
@@ -147,20 +157,31 @@ pub fn select_out_links_by_message(connection: &mut SqliteConnection, id: &str) 
         AND root_keys.key = ?2
         AND content_type = ?3
 ",
-    )?;
+    )
+    .bind(id)
+    .bind(id)
+    .bind("post")
+    .fetch_all(connection)
+    .await?;
 
-    let rows = stmt.query_map(&[id, id, "post"], |row| {
-        Ok(Link::Back {
-            id: row.get(0)?,
-            author: row.get(1)?,
-            timestamp: row.get(2)?,
+    let out_links = rows
+        .into_iter()
+        .map(|row| {
+            Ok(Link::Back {
+                id: row.get(0),
+                author: row.get(1),
+                timestamp: row.get(2),
+            })
         })
-    })?;
+        .collect::<Result<Vec<Link>, Error>>()?;
 
-    rows.collect()
+    Ok(out_links)
 }
 
-pub fn select_back_links_by_message(connection: &mut SqliteConnection, id: &str) -> Result<Vec<Link>, Error> {
+pub async fn select_back_links_by_message(
+    connection: &mut SqliteConnection,
+    id: &str,
+) -> Result<Vec<Link>, Error> {
     /*
         SELECT
             links.link_from_key as id,
@@ -174,7 +195,7 @@ pub fn select_back_links_by_message(connection: &mut SqliteConnection, id: &str)
         AND NOT content_type = 'vote'
         AND NOT content_type = 'tag'
     */
-    let mut stmt = connection.prepare_cached(
+    let rows = query(
         "
         SELECT
                 links.link_from_key as id,
@@ -189,17 +210,25 @@ pub fn select_back_links_by_message(connection: &mut SqliteConnection, id: &str)
         AND root_keys.key = ?2
         AND content_type = ?3
 ",
-    )?;
+    )
+    .bind(id)
+    .bind(id)
+    .bind("post")
+    .fetch_all(connection)
+    .await?;
 
-    let rows = stmt.query_map(&[id, id, "post"], |row| {
-        Ok(Link::Back {
-            id: row.get(0)?,
-            author: row.get(1)?,
-            timestamp: row.get(2)?,
+    let back_links = rows
+        .into_iter()
+        .map(|row| {
+            Ok(Link::Back {
+                id: row.get(0),
+                author: row.get(1),
+                timestamp: row.get(2),
+            })
         })
-    })?;
+        .collect::<Result<Vec<Link>, Error>>()?;
 
-    rows.collect()
+    Ok(back_links)
 }
 
 /*

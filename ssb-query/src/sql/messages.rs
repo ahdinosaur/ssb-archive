@@ -1,24 +1,21 @@
 use log::trace;
-use rusqlite::types::ToSql;
-use sqlx::{query, Error, SqliteConnection};
 use serde_json::Value;
+use sqlx::{query, Error, SqliteConnection};
 
 use crate::sql::*;
+use crate::SsbMessage;
 
-pub fn insert_message(
+pub async fn insert_message(
     connection: &mut SqliteConnection,
     message: &SsbMessage,
     seq: i64,
     message_key_id: i64,
     is_decrypted: bool,
-) -> Result<usize, Error> {
-    trace!("prepare stmt");
-    let mut insert_msg_stmt = connection.prepare_cached("INSERT INTO messages_raw (flume_seq, key_id, seq, received_time, asserted_time, root_id, fork_id, author_id, content_type, content, is_decrypted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
-
+) -> Result<(), Error> {
     trace!("get root key id");
     let root_key_id = match message.value.content["root"] {
         Value::String(ref key) => {
-            let id = find_or_create_key(&mut SqliteConnection, &key).unwrap();
+            let id = find_or_create_key(connection, key).await?;
             Some(id)
         }
         _ => None,
@@ -27,34 +24,37 @@ pub fn insert_message(
     trace!("get fork key id");
     let fork_key_id = match message.value.content["fork"] {
         Value::String(ref key) => {
-            let id = find_or_create_key(&mut SqliteConnection, &key).unwrap();
+            let id = find_or_create_key(connection, key).await?;
             Some(id)
         }
         _ => None,
     };
 
     trace!("find or create author");
-    let author_id = find_or_create_author(&mut SqliteConnection, &message.value.author)?;
+    let author_id = find_or_create_author(connection, &message.value.author).await?;
 
     trace!("insert message");
-    insert_msg_stmt.execute(&[
-        &seq as &dyn ToSql,
-        &message_key_id,
-        &message.value.sequence,
-        &message.timestamp,
-        &message.value.timestamp,
-        &root_key_id as &dyn ToSql,
-        &fork_key_id as &dyn ToSql,
-        &author_id,
-        &message.value.content["type"].as_str() as &dyn ToSql,
-        &message.value.content as &dyn ToSql,
-        &is_decrypted as &dyn ToSql,
-    ])
+    query("INSERT INTO messages_raw (flume_seq, key_id, seq, received_time, asserted_time, root_id, fork_id, author_id, content_type, content, is_decrypted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(seq)
+        .bind(message_key_id)
+        .bind(message.value.sequence)
+        .bind(message.timestamp)
+        .bind(message.value.timestamp)
+        .bind(root_key_id)
+        .bind(fork_key_id)
+        .bind(author_id)
+        .bind(message.value.content["type"].as_str())
+        .bind(&message.value.content)
+        .bind(is_decrypted)
+        .execute(connection)
+        .await?;
+
+    Ok(())
 }
 
-pub fn create_messages_tables(connection: &mut SqliteConnection) -> Result<usize, Error> {
+pub async fn create_messages_tables(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating messages tables");
-    connection.execute(
+    query(
         "CREATE TABLE IF NOT EXISTS messages_raw (
           flume_seq INTEGER PRIMARY KEY,
           key_id INTEGER UNIQUE, 
@@ -68,13 +68,16 @@ pub fn create_messages_tables(connection: &mut SqliteConnection) -> Result<usize
           content JSON,
           is_decrypted BOOLEAN
         )",
-        (),
     )
+    .execute(connection)
+    .await?;
+
+    Ok(())
 }
 
-pub fn create_messages_views(connection: &mut SqliteConnection) -> Result<usize, Error> {
+pub async fn create_messages_views(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating messages views");
-    connection.execute(
+    query(
         "
         CREATE VIEW IF NOT EXISTS messages AS
         SELECT 
@@ -99,47 +102,56 @@ pub fn create_messages_views(connection: &mut SqliteConnection) -> Result<usize,
         LEFT JOIN keys AS fork_keys ON fork_keys.id=messages_raw.fork_id
         JOIN authors ON authors.id=messages_raw.author_id
         ",
-        (),
     )
-}
+    .execute(connection)
+    .await?;
 
-pub fn create_messages_indices(connection: &mut SqliteConnection) -> Result<(), Error> {
-    trace!("Creating messages indices");
-    create_content_type_index(&mut SqliteConnection)?;
-    create_root_index(&mut SqliteConnection)?;
-    create_fork_index(&mut SqliteConnection)?;
-    create_author_index(connection)?;
     Ok(())
 }
 
-fn create_author_index(connection: &mut SqliteConnection) -> Result<usize, Error> {
+pub async fn create_messages_indices(connection: &mut SqliteConnection) -> Result<(), Error> {
+    trace!("Creating messages indices");
+
+    create_content_type_index(connection).await?;
+    create_root_index(connection).await?;
+    create_fork_index(connection).await?;
+    create_author_index(connection).await?;
+
+    Ok(())
+}
+
+async fn create_author_index(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating author index");
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS author_id_index on messages_raw (author_id)",
-        (),
-    )
+    query("CREATE INDEX IF NOT EXISTS author_id_index on messages_raw (author_id)")
+        .execute(connection)
+        .await?;
+
+    Ok(())
 }
 
-fn create_root_index(connection: &mut SqliteConnection) -> Result<usize, Error> {
+async fn create_root_index(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating root index");
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS root_id_index on messages_raw (root_id)",
-        (),
-    )
+    query("CREATE INDEX IF NOT EXISTS root_id_index on messages_raw (root_id)")
+        .execute(connection)
+        .await?;
+
+    Ok(())
 }
 
-fn create_fork_index(connection: &mut SqliteConnection) -> Result<usize, Error> {
-    trace!("Creating root index");
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS fork_id_index on messages_raw (fork_id)",
-        (),
-    )
+async fn create_fork_index(connection: &mut SqliteConnection) -> Result<(), Error> {
+    trace!("Creating fork index");
+    query("CREATE INDEX IF NOT EXISTS fork_id_index on messages_raw (fork_id)")
+        .execute(connection)
+        .await?;
+
+    Ok(())
 }
 
-fn create_content_type_index(connection: &mut SqliteConnection) -> Result<usize, Error> {
+async fn create_content_type_index(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating content type index");
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS content_type_index on messages_raw (content_type)",
-        (),
-    )
+    query("CREATE INDEX IF NOT EXISTS content_type_index on messages_raw (content_type)")
+        .execute(connection)
+        .await?;
+
+    Ok(())
 }

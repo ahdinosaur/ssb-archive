@@ -3,41 +3,45 @@ use sqlx::{query, Error, SqliteConnection};
 
 use crate::sql::*;
 
-pub fn create_mentions_tables(connection: &mut SqliteConnection) -> Result<usize, Error> {
+pub async fn create_mentions_tables(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating mentions tables");
 
-    connection.execute(
+    query(
         "CREATE TABLE IF NOT EXISTS mentions_raw (
           id INTEGER PRIMARY KEY,
           link_from_key_id INTEGER,
           link_to_author_id INTEGER
         )",
-        (),
     )
+    .execute(connection)
+    .await?;
+
+    Ok(())
 }
 
-pub fn insert_mentions(connection: &mut SqliteConnection, links: &[&serde_json::Value], message_key_id: i64) {
-    let mut insert_link_stmt = connection
-        .prepare_cached(
-            "INSERT INTO mentions_raw (link_from_key_id, link_to_author_id) VALUES (?, ?)",
-        )
-        .unwrap();
-
-    links
+pub async fn insert_mentions(
+    connection: &mut SqliteConnection,
+    links: &[&Value],
+    message_key_id: i64,
+) -> Result<(), Error> {
+    for link in links
         .iter()
-        .filter(|link| link.is_string())
-        .map(|link| link.as_str().unwrap())
+        .filter_map(|link| link.as_str())
         .filter(|link| link.starts_with('@'))
-        .map(|link| find_or_create_key(&mut SqliteConnection, link).unwrap())
-        .for_each(|link_id| {
-            insert_link_stmt
-                .execute(&[&message_key_id, &link_id])
-                .unwrap();
-        });
+    {
+        let link_id = find_or_create_key(&mut *connection, link).await?;
+        query("INSERT INTO mentions_raw (link_from_key_id, link_to_author_id) VALUES (?, ?)")
+            .bind(message_key_id)
+            .bind(link_id)
+            .execute(&mut *connection)
+            .await?;
+    }
+
+    Ok(())
 }
 
-pub fn create_mentions_views(connection: &mut SqliteConnection) -> Result<usize, Error> {
-    connection.execute(
+pub async fn create_mentions_views(connection: &mut SqliteConnection) -> Result<(), Error> {
+    query(
         "
         CREATE VIEW IF NOT EXISTS mentions AS
         SELECT 
@@ -52,21 +56,30 @@ pub fn create_mentions_views(connection: &mut SqliteConnection) -> Result<usize,
         JOIN authors ON authors.id = mentions_raw.link_to_author_id
         JOIN messages_raw ON messages_raw.key_id = mentions_raw.link_from_key_id
         ",
-        (),
     )
-}
-pub fn create_mentions_indices(connection: &mut SqliteConnection) -> Result<usize, Error> {
-    create_mentions_to_index(connection)
+    .execute(connection)
+    .await?;
+
+    Ok(())
 }
 
-fn create_mentions_to_index(conn: &mut SqliteConnection) -> Result<usize, Error> {
+pub async fn create_mentions_indices(connection: &mut SqliteConnection) -> Result<(), Error> {
+    create_mentions_to_index(connection).await
+}
+
+async fn create_mentions_to_index(conn: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating mentions index");
-    conn.execute(
+    query(
         "CREATE INDEX IF NOT EXISTS mentions_id_to_index on mentions_raw (link_to_author_id, link_from_key_id)",
-        (),
-    )?;
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS mentions_id_from_index on mentions_raw (link_from_key_id, link_to_author_id)",
-        (),
     )
+    .execute(&mut *conn)
+    .await?;
+
+    query(
+        "CREATE INDEX IF NOT EXISTS mentions_id_from_index on mentions_raw (link_from_key_id, link_to_author_id)",
+    )
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
 }
