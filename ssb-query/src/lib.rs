@@ -53,24 +53,25 @@ impl SsbQuery {
             Some(_) => 1,
         };
 
-        self.log
+        for chunk in self
+            .log
             .iter_at_offset(latest.unwrap_or(0))
             .skip(num_to_skip as usize)
             .take(chunk_size as usize)
             .map(|data| (data.offset, data.data)) //TODO log_latest might not be the right thing
             .chunks(1000)
             .into_iter()
-            .for_each(async |chunk| {
-                let vec = chunk.collect_vec();
-                self.view.append_batch(&vec).await;
-            })
+        {
+            let vec = chunk.collect_vec();
+            self.view.append_batch(&vec).await;
+        }
     }
 
     // queries
 
     pub async fn select_all_messages_by_feed(
         &mut self,
-        options: SelectAllMessagesByFeedOptions,
+        options: SelectAllMessagesByFeedOptions<'_>,
     ) -> Result<Vec<SsbMessage>, SqlViewError> {
         Ok(select_all_messages_by_feed(&mut self.view.connection, options).await?)
     }

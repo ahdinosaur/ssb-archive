@@ -89,6 +89,7 @@ pub async fn create_abouts_views(connection: &mut SqliteConnection) -> Result<()
         ",
     )
     .execute(connection)
-    .await;
+    .await?;
+
     Ok(())
 }

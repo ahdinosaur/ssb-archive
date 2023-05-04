@@ -1,23 +1,26 @@
+use std::error::Error;
+
 use ssb_markdown::render;
 use ssb_query::{SelectAllMessagesByFeedOptions, SsbQuery};
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let mut view = SsbQuery::new(
         "/home/dinosaur/.ssb/flume/log.offset".into(),
         "/home/dinosaur/repos/ahdinosaur/ssb-archive/output.sqlite3".into(),
         Vec::new(),
         &"6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519",
     )
-    .unwrap();
+    .await?;
 
-    while view.get_log_latest() != view.get_view_latest() {
-        println!("log latest: {:?}", view.get_log_latest());
-        println!("view latest: {:?}", view.get_view_latest());
-        view.process(10000);
+    while view.get_log_latest().await != view.get_view_latest().await {
+        println!("log latest: {:?}", view.get_log_latest().await);
+        println!("view latest: {:?}", view.get_view_latest().await);
+        view.process(10000).await;
     }
 
     let feed_id = "@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519";
-    let max_seq = view.select_max_seq_by_feed(feed_id).unwrap();
+    let max_seq = view.select_max_seq_by_feed(feed_id).await.unwrap();
 
     let messages = view
         .select_all_messages_by_feed(SelectAllMessagesByFeedOptions {
@@ -27,7 +30,7 @@ fn main() {
             less_than_seq: max_seq + 1,
             is_decrypted: false,
         })
-        .unwrap();
+        .await?;
 
     for message in messages {
         println!("{:?}", message.value.content["text"]);
@@ -136,5 +139,7 @@ fn main() {
     ) as description
     */
 
-    println!("Done!")
+    println!("Done!");
+
+    Ok(())
 }

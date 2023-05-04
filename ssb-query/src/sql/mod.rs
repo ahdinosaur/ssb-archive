@@ -116,17 +116,18 @@ impl SqlView {
     ) -> Result<(), SqlViewError> {
         trace!("Start batch append");
 
-        let secret_keys = &self.secret_keys;
+        let secret_keys = self.secret_keys.clone();
+        let items_cloned = items.to_vec();
         self.connection
-            .transaction::<_, _, SqlError>(|mut conn| {
+            .transaction::<'_, _, _, SqlError>(move |mut conn| {
                 Box::pin(async move {
-                    for item in items {
-                        append_item(&mut conn, secret_keys, &item.0, &item.1).await?;
+                    for item in items_cloned {
+                        append_item(&mut conn, &secret_keys, &item.0, &item.1).await?;
                     }
                     Ok(())
                 })
             })
-            .await;
+            .await?;
 
         Ok(())
     }
@@ -244,7 +245,7 @@ async fn append_item(
         }
     }
 
-    insert_branches(connection, &message, message_key_id).await;
+    insert_branches(connection, &message, message_key_id).await?;
     insert_message(
         connection,
         &message,
@@ -263,7 +264,7 @@ async fn set_pragmas(connection: &mut SqliteConnection) -> Result<(), SqlError> 
     query("PRAGMA synchronous = OFF")
         .execute(&mut *connection)
         .await?;
-    query("PRAGMA page size = 4096")
+    query("PRAGMA page_size = 4096")
         .execute(&mut *connection)
         .await?;
     Ok(())

@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 ssb-query = { path = "../ssb-query" }
 ssb-markdown = { path = "../ssb-markdown" }
+tokio = { version = "1.28.0", features = ["rt", "macros"] }
