@@ -51,11 +51,11 @@ pub async fn insert_links(
         .filter_map(|link| link.as_str())
         .filter(|link| link.starts_with('%'))
     {
-        let link_id = find_or_create_key(connection, link).await?;
+        let link_id = find_or_create_key(&mut *connection, link).await?;
         query("INSERT INTO links_raw (link_from_key_id, link_to_key_id) VALUES (?, ?)")
             .bind(message_key_id)
             .bind(link_id)
-            .execute(connection)
+            .execute(&mut *connection)
             .await?;
     }
 

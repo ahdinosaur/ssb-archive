@@ -30,11 +30,11 @@ pub async fn insert_abouts(
 
         let (link_to_author_id, link_to_key_id) = match about_key.get(0..1) {
             Some("@") => {
-                key = find_or_create_author(connection, about_key).unwrap();
+                key = find_or_create_author(connection, about_key).await?;
                 (Some(key), None)
             }
             Some("%") => {
-                key = find_or_create_key(connection, about_key).unwrap();
+                key = find_or_create_key(connection, about_key).await?;
                 (None, Some(key))
             }
             _ => (None, None),

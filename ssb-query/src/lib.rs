@@ -17,7 +17,7 @@ pub struct SsbQuery {
 }
 
 impl SsbQuery {
-    pub fn new(
+    pub async fn new(
         log_path: String,
         view_path: String,
         keys: Vec<Keypair>,
@@ -30,21 +30,21 @@ impl SsbQuery {
             .open(&log_path)
             .unwrap();
         let log = OffsetLog::<u32>::from_file(log_file).unwrap();
-        let view = SqlView::new(&view_path, keys, pub_key)?;
+        let view = SqlView::new(&view_path, keys, pub_key).await?;
 
         Ok(SsbQuery { view, log })
     }
 
-    pub fn get_log_latest(&self) -> Option<Sequence> {
+    pub async fn get_log_latest(&self) -> Option<Sequence> {
         self.log.latest()
     }
 
-    pub fn get_view_latest(&self) -> Option<Sequence> {
-        self.view.get_latest().unwrap()
+    pub async fn get_view_latest(&mut self) -> Option<Sequence> {
+        self.view.get_latest().await.unwrap()
     }
 
-    pub fn process(&mut self, chunk_size: u64) {
-        let latest = self.get_view_latest();
+    pub async fn process(&mut self, chunk_size: u64) {
+        let latest = self.get_view_latest().await;
 
         //If the latest is 0, we haven't got anything in the db. Don't skip the very first
         //element in the offset log. I know this isn't super nice. It could be refactored later.
@@ -60,22 +60,22 @@ impl SsbQuery {
             .map(|data| (data.offset, data.data)) //TODO log_latest might not be the right thing
             .chunks(1000)
             .into_iter()
-            .for_each(|chunk| {
+            .for_each(async |chunk| {
                 let vec = chunk.collect_vec();
-                self.view.append_batch(&vec);
+                self.view.append_batch(&vec).await;
             })
     }
 
     // queries
 
-    pub fn select_all_messages_by_feed(
-        &self,
+    pub async fn select_all_messages_by_feed(
+        &mut self,
         options: SelectAllMessagesByFeedOptions,
     ) -> Result<Vec<SsbMessage>, SqlViewError> {
-        Ok(select_all_messages_by_feed(&self.view.connection, options)?)
+        Ok(select_all_messages_by_feed(&mut self.view.connection, options).await?)
     }
 
-    pub fn select_max_seq_by_feed(&self, feed_id: &str) -> Result<i64, SqlViewError> {
-        Ok(select_max_seq_by_feed(&self.view.connection, feed_id)?)
+    pub async fn select_max_seq_by_feed(&mut self, feed_id: &str) -> Result<i64, SqlViewError> {
+        Ok(select_max_seq_by_feed(&mut self.view.connection, feed_id).await?)
     }
 }
