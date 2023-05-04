@@ -43,7 +43,7 @@ impl SsbQuery {
         self.view.get_latest().await.unwrap()
     }
 
-    pub async fn process(&mut self, chunk_size: u64) {
+    pub async fn process(&mut self, chunk_size: u64) -> Result<(), SqlViewError> {
         let latest = self.get_view_latest().await;
 
         //If the latest is 0, we haven't got anything in the db. Don't skip the very first
@@ -63,8 +63,10 @@ impl SsbQuery {
             .into_iter()
         {
             let vec = chunk.collect_vec();
-            self.view.append_batch(&vec).await;
+            self.view.append_batch(&vec).await?;
         }
+
+        Ok(())
     }
 
     // queries

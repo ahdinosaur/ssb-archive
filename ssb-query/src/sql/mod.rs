@@ -116,8 +116,8 @@ impl SqlView {
     ) -> Result<(), SqlViewError> {
         trace!("Start batch append");
 
-        let secret_keys = self.secret_keys.clone();
-        let items_cloned = items.to_vec();
+        let secret_keys = self.secret_keys.to_owned();
+        let items_cloned = items.to_owned();
         self.connection
             .transaction::<'_, _, _, SqlError>(move |mut conn| {
                 Box::pin(async move {
