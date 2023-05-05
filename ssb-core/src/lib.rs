@@ -1,6 +1,22 @@
 // https://github.com/ssbc/ssb-typescript
 
+use serde_json::Value;
 use std::convert::TryFrom;
+use thiserror::Error as ThisError;
+
+#[derive(ThisError)]
+pub enum Error {
+    #[error("{type} must start with {sigil}.")]
+    IdMissingSigil {
+        idType: &'static str,
+        sigil: &'static str,
+    },
+    #[error("Missing {field} field in {contentType} content.")]
+    MissingField {
+        contentType: &'static str,
+        field: &'static str,
+    },
+}
 
 /**
  * Starts with @
@@ -14,7 +30,10 @@ impl TryFrom<String> for FeedId {
         if value.starts_with('@') {
             Ok(FeedId(value))
         } else {
-            Err("FeedId must start with '@'")
+            Err(Error::IdMissingSigil {
+                idType: "FeedId",
+                sigil: "'@'",
+            })
         }
     }
 }
@@ -31,7 +50,10 @@ impl TryFrom<String> for MsgId {
         if value.starts_with('%') {
             Ok(MsgId(value))
         } else {
-            Err("MsgId must start with '%'")
+            Err(Error::IdMissingSigil {
+                idType: "MsgId",
+                sigil: "'%'",
+            })
         }
     }
 }
@@ -48,7 +70,35 @@ impl TryFrom<String> for BlobId {
         if value.starts_with('&') {
             Ok(BlobId(value))
         } else {
-            Err("BlobId must start with '&'")
+            Err(Error::IdMissingSigil {
+                idType: "BlobId",
+                sigil: "'&'",
+            })
+        }
+    }
+}
+
+pub enum LinkId {
+    Feed(FeedId),
+    Msg(MsgId),
+    Blob(BlobId),
+}
+
+impl TryFrom<String> for BlobId {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.starts_with('@') {
+            Ok(LinkId::Feed(FeedId(value)))
+        } else if value.starts_with('%') {
+            Ok(LinkId::Msg(MsgId(value)))
+        } else if value.starts_with('&') {
+            Ok(LinkId::Blob(BlobId(value)))
+        } else {
+            Err(Error::IdMissingSigil {
+                idType: "LinkId",
+                sigil: "either '@', '%', or '&'",
+            })
         }
     }
 }
@@ -71,6 +121,7 @@ pub struct MsgValue {
 
 pub enum Content {
     Post(PostContent),
+    /*
     Contact(ContactContent),
     Vote(VoteContent),
     About(AboutContent),
@@ -79,25 +130,118 @@ pub enum Content {
     Gathering(GatheringContent),
     GatheringUpdate(GatheringUpdateContent),
     Attendee(AttendeeContent),
+    */
     Other,
+}
+
+impl TryFrom<Value> for Content {
+    type Error = &'static str;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        let content_type = value
+            .get("type")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing 'type' field in SSB message content.")?;
+
+        match content_type {
+            "post" => Ok(Content::Post(PostContent::try_from(value)?)),
+            /*
+            "contact" => Ok(Content::Contact(ContactContent::try_from(value)?)),
+            "vote" => Ok(Content::Vote(VoteContent::try_from(value)?)),
+            "about" => Ok(Content::About(AboutContent::try_from(value)?)),
+            "blog" => Ok(Content::Blog(BlogContent::try_from(value)?)),
+            "room/alias" => Ok(Content::Alias(AliasContent::try_from(value)?)),
+            "gathering" => Ok(Content::Gathering(GatheringContent::try_from(value)?)),
+            "gathering-update" => Ok(Content::GatheringUpdate(GatheringUpdateContent::try_from(
+                value,
+            )?)),
+            "attendee" => Ok(Content::Attendee(AttendeeContent::try_from(value)?)),
+            */
+            _ => Ok(Content::Other),
+        }
+    }
 }
 
 pub struct PostContent {
     text: String,
     channel: Option<String>,
-    mentions: Option<Vec<any>>,
+    mentions: Option<Vec<Mention>>,
     root: Option<MsgId>,
     branch: Option<Vec<MsgId>>,
     fork: Option<MsgId>,
 }
 
-pub struct AboutContent {
-    about: FeedId,
-    name: Option<String>,
-    description: Option<String>,
-    image: Option<String>,
+impl TryFrom<Value> for PostContent {
+    type Error = Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        let text = value.get("text").map(String::from);
+        let channel = value.get("channel").map(String::from);
+        let mentions = value.get("mentions").map(TryInto::try_into)?;
+        let root = value.get("root").map(String::from).map(TryInto::into)?;
+        let branch = value.get("branch").map(|v| {
+            if v.is_array() {
+                Some(v.as_array().unwrap().iter().map(|b| b.into()).collect())
+            } else if v.is_string() {
+                Some(vec![v.to_string().into()])
+            } else {
+                None
+            }
+        })?;
+        let fork = value.get("fork").map(String::from).map(TryInto::into)?;
+
+        Ok(PostContent {
+            text,
+            channel,
+            mentions,
+            root,
+            branch,
+            fork,
+        })
+    }
 }
 
+pub struct Mention {
+    pub link: LinkId,
+    pub name: Option<String>,
+}
+
+impl TryFrom<Value> for Mention {
+    type Error = Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        if value.is_array() {
+            value
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| {
+                    let link: LinkId =
+                        item.get("link")
+                            .map(TryFrom::into)
+                            .ok_or(Err(Error::MissingField {
+                                contentType: "Mention",
+                                field: "link",
+                            }));
+                    let name = item.get("name").map(String::from);
+                    Mention { link, name }
+                })
+                .collect()
+        } else {
+            let link: LinkId =
+                item.get("link")
+                    .map(TryFrom::into)
+                    .ok_or(Err(Error::MissingField {
+                        contentType: "Mention",
+                        field: "link",
+                    }));
+            let name = item.get("name").map(String::from);
+            Mention { link, name }
+        }
+    }
+}
+
+/*
 pub struct ContactContent {
     contact: Option<FeedId>,
     following: Option<bool>,
@@ -112,6 +256,13 @@ pub struct Vote {
     link: MsgId,
     value: i32,
     expression: String,
+}
+
+pub struct AboutContent {
+    about: FeedId,
+    name: Option<String>,
+    description: Option<String>,
+    image: Option<Image>,
 }
 
 pub struct BlogContent {
@@ -158,7 +309,7 @@ pub struct Image {
     link: BlobId,
     name: Option<String>,
     size: Option<u64>,
-    type_: Option<String>,
+    type: Option<String>,
 }
 
 pub struct AttendeeContent {
@@ -170,6 +321,7 @@ pub struct Attendee {
     link: FeedId,
     remove: Option<bool>,
 }
+*/
 
 #[cfg(test)]
 mod tests {
