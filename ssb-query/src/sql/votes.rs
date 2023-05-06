@@ -22,7 +22,7 @@ pub async fn create_votes_tables(connection: &mut SqliteConnection) -> Result<()
 
 pub async fn insert_or_update_votes(
     connection: &mut SqliteConnection,
-    message: &SsbMessage,
+    message: &Msg,
 ) -> Result<(), Error> {
     if let Value::Number(value) = &message.value.content["vote"]["value"] {
         if let Value::String(link) = &message.value.content["vote"]["link"] {

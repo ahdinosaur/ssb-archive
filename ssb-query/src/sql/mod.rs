@@ -1,5 +1,5 @@
 use base64::engine::{general_purpose::STANDARD as b64, Engine};
-use flumedb::flume_view::{FlumeView, Sequence};
+use flumedb::flume_view::Sequence;
 use log::{info, trace};
 use private_box::Keypair;
 use serde_derive::{Deserialize, Serialize};
@@ -9,7 +9,10 @@ use sqlx::{
     sqlite::{SqliteConnection, SqliteRow},
     Connection, Error as SqlError, Row,
 };
+use ssb_core::MsgContentTyped;
 use thiserror::Error as ThisError;
+
+pub use ssb_core::{Msg, MsgContent, MsgValue};
 
 mod abouts;
 mod authors;
@@ -38,21 +41,6 @@ use self::migrations::*;
 pub use self::queries::SelectAllMessagesByFeedOptions;
 pub(crate) use self::queries::*;
 use self::votes::*;
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SsbValue {
-    pub author: String,
-    pub sequence: u32,
-    pub timestamp: f64,
-    pub content: Value,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SsbMessage {
-    pub key: String,
-    pub value: SsbValue,
-    pub timestamp: f64,
-}
 
 #[derive(Debug, ThisError)]
 pub enum SqlViewError {
@@ -185,35 +173,35 @@ fn find_values_in_object_by_key<'a>(
     }
 }
 
-fn attempt_decryption(mut message: SsbMessage, secret_keys: &[Keypair]) -> (bool, SsbMessage) {
+fn attempt_decryption(mut message: Msg, secret_keys: &[Keypair]) -> (bool, Msg) {
     let mut is_decrypted = false;
 
-    message = match message.value.content["type"] {
-        Value::Null => {
-            let content = message.value.content.clone();
-            let string = &content.as_str().unwrap();
+    let new_message;
 
-            let string = string.trim_end_matches(".box");
+    if let MsgContent::Unknown(Value::String(content)) = message.value.content {
+        let string = content.trim_end_matches(".box");
 
-            let decoded = b64.decode(string);
-            if let Ok(bytes) = decoded {
-                for secret_key in secret_keys {
-                    message.value.content = private_box::decrypt(&bytes, secret_key)
-                        .and_then(|data| {
-                            is_decrypted = true;
-                            serde_json::from_slice(&data).ok()
-                        })
-                        .unwrap_or(Value::Null); //If we can't decrypt it, throw it away.
-
-                    if is_decrypted {
-                        break;
+        let decoded = b64.decode(string);
+        if let Ok(bytes) = decoded {
+            for secret_key in secret_keys {
+                if let Some(decrypted) = private_box::decrypt(&bytes, secret_key) {
+                    is_decrypted = true;
+                    if let Ok(new_content) = serde_json::from_slice(&decrypted) {
+                        new_message = Msg {
+                            value: MsgValue {
+                                content: new_content,
+                                ..message.value
+                            },
+                            ..message
+                        };
                     }
+                    break;
                 }
             }
-
-            message
         }
-        _ => message,
+        new_message = message;
+    } else {
+        new_message = message;
     };
 
     (is_decrypted, message)
@@ -225,13 +213,17 @@ async fn append_item(
     seq: &Sequence,
     item: &[u8],
 ) -> Result<(), SqlError> {
-    let message: SsbMessage = serde_json::from_slice(item).unwrap();
+    let message: Msg = serde_json::from_slice(item).unwrap();
 
     let (is_decrypted, message) = attempt_decryption(message, secret_keys);
 
     let message_key_id = find_or_create_key(connection, &message.key).await.unwrap();
 
     // votes are a kind of backlink, but we want to put them in their own table.
+    match message.value.content {
+        MsgContent::Unknown(Value) => {}
+        MsgContent::Typed(MsgContentTyped::Post(post)) => {}
+    }
     match &message.value.content["type"] {
         Value::String(type_string) if type_string == "vote" => {
             insert_or_update_votes(connection, &message).await?;

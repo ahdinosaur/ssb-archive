@@ -1,6 +1,6 @@
 // https://github.com/ssbc/ssb-typescript
 
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::serde_as;
 use std::{convert::TryFrom, marker::PhantomData};
@@ -26,7 +26,7 @@ MissingField {
 /**
  * Starts with @
  */
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "String")]
 pub struct FeedId(String);
 
@@ -45,10 +45,16 @@ impl TryFrom<String> for FeedId {
     }
 }
 
+impl From<FeedId> for String {
+    fn from(value: FeedId) -> String {
+        value.0
+    }
+}
+
 /**
  * Starts with %
  */
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "String")]
 pub struct MsgId(String);
 
@@ -67,10 +73,16 @@ impl TryFrom<String> for MsgId {
     }
 }
 
+impl From<MsgId> for String {
+    fn from(value: MsgId) -> String {
+        value.0
+    }
+}
+
 /**
  * Starts with &
  */
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "String")]
 pub struct BlobId(String);
 
@@ -89,10 +101,16 @@ impl TryFrom<String> for BlobId {
     }
 }
 
+impl From<BlobId> for String {
+    fn from(value: BlobId) -> String {
+        value.0
+    }
+}
+
 /**
- * Starts with &
+ * Starts with #
  */
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "String")]
 pub struct HashtagId(String);
 
@@ -111,7 +129,13 @@ impl TryFrom<String> for HashtagId {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+impl From<HashtagId> for String {
+    fn from(value: HashtagId) -> String {
+        value.0
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "String")]
 pub enum LinkId {
     Feed(FeedId),
@@ -141,14 +165,25 @@ impl TryFrom<String> for LinkId {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+impl From<LinkId> for String {
+    fn from(value: LinkId) -> String {
+        match value {
+            LinkId::Feed(id) => id.into(),
+            LinkId::Msg(id) => id.into(),
+            LinkId::Blob(id) => id.into(),
+            LinkId::Hashtag(id) => id.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Msg {
     pub key: MsgId,
     pub value: MsgValue,
     pub timestamp_received: i64,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MsgValue {
     pub previous: MsgId,
     pub author: FeedId,
@@ -157,7 +192,7 @@ pub struct MsgValue {
     #[serde(default = "MsgValue::default_hash")]
     pub hash: String,
     pub content: MsgContent,
-    pub signature: String,
+    // pub signature: String,
 }
 
 impl MsgValue {
@@ -166,9 +201,16 @@ impl MsgValue {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(tag = "type")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
 pub enum MsgContent {
+    Typed(MsgContentTyped),
+    Unknown(Value),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "type")]
+pub enum MsgContentTyped {
     Post(PostContent),
     /*
     Contact(ContactContent),
@@ -180,13 +222,10 @@ pub enum MsgContent {
     GatheringUpdate(GatheringUpdateContent),
     Attendee(AttendeeContent),
     */
-    Json(Value),
-    #[serde(other)]
-    Other,
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PostContent {
     pub text: String,
     pub channel: Option<String>,
@@ -197,7 +236,7 @@ pub struct PostContent {
     pub fork: Option<MsgId>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Mention {
     pub link: LinkId,
     pub name: Option<String>,

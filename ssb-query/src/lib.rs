@@ -9,7 +9,7 @@ pub mod sql;
 pub use sql::SelectAllMessagesByFeedOptions;
 use sql::SqlViewError;
 use sql::{select_all_messages_by_feed, select_max_seq_by_feed};
-pub use sql::{SqlView, SsbMessage, SsbValue};
+pub use sql::{SqlView, Msg, MsgValue};
 
 pub struct SsbQuery {
     view: SqlView,
@@ -74,7 +74,7 @@ impl SsbQuery {
     pub async fn select_all_messages_by_feed(
         &mut self,
         options: SelectAllMessagesByFeedOptions<'_>,
-    ) -> Result<Vec<SsbMessage>, SqlViewError> {
+    ) -> Result<Vec<Msg>, SqlViewError> {
         Ok(select_all_messages_by_feed(&mut self.view.connection, options).await?)
     }
 

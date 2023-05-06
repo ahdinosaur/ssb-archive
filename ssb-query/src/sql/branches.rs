@@ -6,7 +6,7 @@ use crate::sql::*;
 
 pub async fn insert_branches(
     connection: &mut SqliteConnection,
-    message: &SsbMessage,
+    message: &Msg,
     message_key_id: i64,
 ) -> Result<(), Error> {
     if let Some(branches_value) = message.value.content.get("branch") {

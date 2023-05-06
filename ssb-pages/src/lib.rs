@@ -1,12 +1,12 @@
 use axohtml::{dom::DOMTree, html, unsafe_text};
 use ssb_markdown::render;
-use ssb_query::SsbMessage;
+use ssb_query::Msg;
 
 pub enum PageError {
     BadContent,
 }
 
-pub fn render_post(message: SsbMessage) -> Result<DOMTree<String>, PageError> {
+pub fn render_post(message: Msg) -> Result<DOMTree<String>, PageError> {
     let value = message.value;
     let content = value.content;
     let content_type = content["type"].as_str().ok_or(PageError::BadContent)?;

@@ -22,7 +22,7 @@ pub async fn create_abouts_tables(connection: &mut SqliteConnection) -> Result<(
 
 pub async fn insert_abouts(
     connection: &mut SqliteConnection,
-    message: &SsbMessage,
+    message: &Msg,
     message_key_id: i64,
 ) -> Result<(), Error> {
     if let Value::String(about_key) = &message.value.content["about"] {

@@ -1,5 +1,5 @@
 use crate::sql::*;
-use crate::SsbMessage;
+use crate::Msg;
 use sqlx::{query, Error, Row, SqliteConnection};
 
 pub async fn select_max_seq_by_feed<'a>(
@@ -36,7 +36,7 @@ pub struct SelectAllMessagesByFeedOptions<'a> {
 pub async fn select_all_messages_by_feed<'a>(
     connection: &mut SqliteConnection,
     options: SelectAllMessagesByFeedOptions<'a>,
-) -> Result<Vec<SsbMessage>, Error> {
+) -> Result<Vec<Msg>, Error> {
     let rows = query(
         "
         SELECT
@@ -70,9 +70,9 @@ pub async fn select_all_messages_by_feed<'a>(
     let messages = rows
         .into_iter()
         .map(|row| {
-            Ok(SsbMessage {
+            Ok(Msg {
                 key: row.get(1),
-                value: SsbValue {
+                value: MsgValue {
                     author: row.get(2),
                     sequence: row.get(0),
                     timestamp: row.get(4),
@@ -81,7 +81,7 @@ pub async fn select_all_messages_by_feed<'a>(
                 timestamp: row.get(3),
             })
         })
-        .collect::<Result<Vec<SsbMessage>, Error>>()?;
+        .collect::<Result<Vec<Msg>, Error>>()?;
 
     Ok(messages)
 }

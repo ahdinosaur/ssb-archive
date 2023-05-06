@@ -3,11 +3,11 @@ use serde_json::Value;
 use sqlx::{query, Error, SqliteConnection};
 
 use crate::sql::*;
-use crate::SsbMessage;
+use crate::Msg;
 
 pub async fn insert_message(
     connection: &mut SqliteConnection,
-    message: &SsbMessage,
+    message: &Msg,
     seq: i64,
     message_key_id: i64,
     is_decrypted: bool,

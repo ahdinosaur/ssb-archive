@@ -24,7 +24,7 @@ pub async fn create_contacts_tables(connection: &mut SqliteConnection) -> Result
 
 pub async fn insert_or_update_contacts(
     connection: &mut SqliteConnection,
-    message: &SsbMessage,
+    message: &Msg,
     _message_key_id: i64,
     is_decrypted: bool,
 ) -> Result<(), Error> {

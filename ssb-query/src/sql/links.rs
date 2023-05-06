@@ -63,7 +63,10 @@ pub async fn insert_links(
 }
 
 pub async fn create_links_indices(connection: &mut SqliteConnection) -> Result<(), Error> {
-    create_links_to_index(connection).await
+    create_links_to_index(&mut *connection).await?;
+    create_links_from_index(&mut *connection).await?;
+
+    Ok(())
 }
 
 async fn create_links_to_index(conn: &mut SqliteConnection) -> Result<(), Error> {
@@ -71,13 +74,17 @@ async fn create_links_to_index(conn: &mut SqliteConnection) -> Result<(), Error>
     query(
         "CREATE INDEX IF NOT EXISTS links_to_id_index on links_raw (link_to_key_id, link_from_key_id)",
     )
-    .execute(&mut *conn)
+    .execute(conn)
     .await?;
 
+    Ok(())
+}
+
+async fn create_links_from_index(conn: &mut SqliteConnection) -> Result<(), Error> {
     query(
         "CREATE INDEX IF NOT EXISTS links_from_id_index on links_raw (link_from_key_id, link_to_key_id)",
     )
-    .execute(&mut *conn)
+    .execute(conn)
     .await?;
 
     Ok(())
