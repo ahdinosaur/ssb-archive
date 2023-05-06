@@ -1,37 +1,44 @@
 // https://github.com/ssbc/ssb-typescript
 
+use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::Value;
-use std::convert::TryFrom;
+use serde_with::serde_as;
+use std::{convert::TryFrom, marker::PhantomData};
 use thiserror::Error as ThisError;
 
-#[derive(ThisError)]
-pub enum Error {
-    #[error("{type} must start with {sigil}.")]
-    IdMissingSigil {
-        idType: &'static str,
+#[derive(Copy, Clone, Debug, ThisError)]
+pub enum IdError {
+    #[error("{id_type} must start with {sigil}.")]
+    MissingSigil {
+        id_type: &'static str,
         sigil: &'static str,
     },
-    #[error("Missing {field} field in {contentType} content.")]
-    MissingField {
-        contentType: &'static str,
-        field: &'static str,
-    },
 }
+
+/*
+#[error("Missing {field} field in {contentType} content.")]
+MissingField {
+    contentType: &'static str,
+    field: &'static str,
+},
+*/
 
 /**
  * Starts with @
  */
+#[derive(Clone, Debug, Deserialize)]
+#[serde(try_from = "String")]
 pub struct FeedId(String);
 
 impl TryFrom<String> for FeedId {
-    type Error = &'static str;
+    type Error = IdError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value.starts_with('@') {
             Ok(FeedId(value))
         } else {
-            Err(Error::IdMissingSigil {
-                idType: "FeedId",
+            Err(IdError::MissingSigil {
+                id_type: "FeedId",
                 sigil: "'@'",
             })
         }
@@ -41,17 +48,19 @@ impl TryFrom<String> for FeedId {
 /**
  * Starts with %
  */
+#[derive(Clone, Debug, Deserialize)]
+#[serde(try_from = "String")]
 pub struct MsgId(String);
 
 impl TryFrom<String> for MsgId {
-    type Error = &'static str;
+    type Error = IdError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value.starts_with('%') {
             Ok(MsgId(value))
         } else {
-            Err(Error::IdMissingSigil {
-                idType: "MsgId",
+            Err(IdError::MissingSigil {
+                id_type: "MsgId",
                 sigil: "'%'",
             })
         }
@@ -61,31 +70,58 @@ impl TryFrom<String> for MsgId {
 /**
  * Starts with &
  */
+#[derive(Clone, Debug, Deserialize)]
+#[serde(try_from = "String")]
 pub struct BlobId(String);
 
 impl TryFrom<String> for BlobId {
-    type Error = &'static str;
+    type Error = IdError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value.starts_with('&') {
             Ok(BlobId(value))
         } else {
-            Err(Error::IdMissingSigil {
-                idType: "BlobId",
+            Err(IdError::MissingSigil {
+                id_type: "BlobId",
                 sigil: "'&'",
             })
         }
     }
 }
 
+/**
+ * Starts with &
+ */
+#[derive(Clone, Debug, Deserialize)]
+#[serde(try_from = "String")]
+pub struct HashtagId(String);
+
+impl TryFrom<String> for HashtagId {
+    type Error = IdError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.starts_with('#') {
+            Ok(HashtagId(value))
+        } else {
+            Err(IdError::MissingSigil {
+                id_type: "HashtagId",
+                sigil: "'#'",
+            })
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(try_from = "String")]
 pub enum LinkId {
     Feed(FeedId),
     Msg(MsgId),
     Blob(BlobId),
+    Hashtag(HashtagId),
 }
 
-impl TryFrom<String> for BlobId {
-    type Error = &'static str;
+impl TryFrom<String> for LinkId {
+    type Error = IdError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value.starts_with('@') {
@@ -94,32 +130,45 @@ impl TryFrom<String> for BlobId {
             Ok(LinkId::Msg(MsgId(value)))
         } else if value.starts_with('&') {
             Ok(LinkId::Blob(BlobId(value)))
+        } else if value.starts_with('#') {
+            Ok(LinkId::Hashtag(HashtagId(value)))
         } else {
-            Err(Error::IdMissingSigil {
-                idType: "LinkId",
-                sigil: "either '@', '%', or '&'",
+            Err(IdError::MissingSigil {
+                id_type: "LinkId",
+                sigil: "either '@', '%', '&', or '#'",
             })
         }
     }
 }
 
+#[derive(Clone, Debug, Deserialize)]
 pub struct Msg {
-    key: MsgId,
-    value: MsgValue,
-    timestamp: i64,
+    pub key: MsgId,
+    pub value: MsgValue,
+    pub timestamp_received: i64,
 }
 
+#[derive(Clone, Debug, Deserialize)]
 pub struct MsgValue {
-    previous: MsgId,
-    author: FeedId,
-    sequence: u64,
-    timestamp: i64,
-    // hash: &'static str,
-    content: MsgContent,
-    signature: String,
+    pub previous: MsgId,
+    pub author: FeedId,
+    pub sequence: u64,
+    pub timestamp_asserted: i64,
+    #[serde(default = "MsgValue::default_hash")]
+    pub hash: String,
+    pub content: MsgContent,
+    pub signature: String,
 }
 
-pub enum Content {
+impl MsgValue {
+    pub fn default_hash() -> String {
+        "sha256".to_string()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type")]
+pub enum MsgContent {
     Post(PostContent),
     /*
     Contact(ContactContent),
@@ -131,114 +180,27 @@ pub enum Content {
     GatheringUpdate(GatheringUpdateContent),
     Attendee(AttendeeContent),
     */
+    Json(Value),
+    #[serde(other)]
     Other,
 }
 
-impl TryFrom<Value> for Content {
-    type Error = &'static str;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        let content_type = value
-            .get("type")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing 'type' field in SSB message content.")?;
-
-        match content_type {
-            "post" => Ok(Content::Post(PostContent::try_from(value)?)),
-            /*
-            "contact" => Ok(Content::Contact(ContactContent::try_from(value)?)),
-            "vote" => Ok(Content::Vote(VoteContent::try_from(value)?)),
-            "about" => Ok(Content::About(AboutContent::try_from(value)?)),
-            "blog" => Ok(Content::Blog(BlogContent::try_from(value)?)),
-            "room/alias" => Ok(Content::Alias(AliasContent::try_from(value)?)),
-            "gathering" => Ok(Content::Gathering(GatheringContent::try_from(value)?)),
-            "gathering-update" => Ok(Content::GatheringUpdate(GatheringUpdateContent::try_from(
-                value,
-            )?)),
-            "attendee" => Ok(Content::Attendee(AttendeeContent::try_from(value)?)),
-            */
-            _ => Ok(Content::Other),
-        }
-    }
-}
-
+#[serde_as]
+#[derive(Clone, Debug, Deserialize)]
 pub struct PostContent {
-    text: String,
-    channel: Option<String>,
-    mentions: Option<Vec<Mention>>,
-    root: Option<MsgId>,
-    branch: Option<Vec<MsgId>>,
-    fork: Option<MsgId>,
+    pub text: String,
+    pub channel: Option<String>,
+    pub mentions: Vec<Mention>,
+    pub root: Option<MsgId>,
+    #[serde_as(as = "serde_with::OneOrMany<_>")]
+    pub branch: Vec<MsgId>,
+    pub fork: Option<MsgId>,
 }
 
-impl TryFrom<Value> for PostContent {
-    type Error = Error;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        let text = value.get("text").map(String::from);
-        let channel = value.get("channel").map(String::from);
-        let mentions = value.get("mentions").map(TryInto::try_into)?;
-        let root = value.get("root").map(String::from).map(TryInto::into)?;
-        let branch = value.get("branch").map(|v| {
-            if v.is_array() {
-                Some(v.as_array().unwrap().iter().map(|b| b.into()).collect())
-            } else if v.is_string() {
-                Some(vec![v.to_string().into()])
-            } else {
-                None
-            }
-        })?;
-        let fork = value.get("fork").map(String::from).map(TryInto::into)?;
-
-        Ok(PostContent {
-            text,
-            channel,
-            mentions,
-            root,
-            branch,
-            fork,
-        })
-    }
-}
-
+#[derive(Clone, Debug, Deserialize)]
 pub struct Mention {
     pub link: LinkId,
     pub name: Option<String>,
-}
-
-impl TryFrom<Value> for Mention {
-    type Error = Error;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        if value.is_array() {
-            value
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|item| {
-                    let link: LinkId =
-                        item.get("link")
-                            .map(TryFrom::into)
-                            .ok_or(Err(Error::MissingField {
-                                contentType: "Mention",
-                                field: "link",
-                            }));
-                    let name = item.get("name").map(String::from);
-                    Mention { link, name }
-                })
-                .collect()
-        } else {
-            let link: LinkId =
-                item.get("link")
-                    .map(TryFrom::into)
-                    .ok_or(Err(Error::MissingField {
-                        contentType: "Mention",
-                        field: "link",
-                    }));
-            let name = item.get("name").map(String::from);
-            Mention { link, name }
-        }
-    }
 }
 
 /*
