@@ -1,12 +1,13 @@
 use log::trace;
 use sqlx::{query, sqlite::SqliteRow, Error, Row, SqliteConnection};
+use ssb_core::MsgId;
 
 pub async fn find_or_create_key(
     connection: &mut SqliteConnection,
-    key: &str,
+    key: &MsgId,
 ) -> Result<i64, Error> {
     let result: Option<i64> = query("SELECT id FROM keys WHERE key=?1")
-        .bind(key)
+        .bind(Into::<String>::into(key))
         .map(|row: SqliteRow| row.get(0))
         .fetch_optional(&mut *connection)
         .await?;
@@ -15,7 +16,7 @@ pub async fn find_or_create_key(
         Ok(found_key)
     } else {
         let created_key = query("INSERT INTO keys (key) VALUES (?)")
-            .bind(key)
+            .bind(Into::<String>::into(key))
             .execute(&mut *connection)
             .await?;
 

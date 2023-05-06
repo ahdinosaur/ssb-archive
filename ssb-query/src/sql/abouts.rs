@@ -1,5 +1,6 @@
 use log::trace;
 use sqlx::{query, Error, SqliteConnection};
+use ssb_core::{AboutContent, LinkId, Msg};
 
 use crate::sql::*;
 
@@ -22,31 +23,28 @@ pub async fn create_abouts_tables(connection: &mut SqliteConnection) -> Result<(
 
 pub async fn insert_abouts(
     connection: &mut SqliteConnection,
-    message: &Msg,
+    msg: &Msg,
+    content: &AboutContent,
     message_key_id: i64,
 ) -> Result<(), Error> {
-    if let Value::String(about_key) = &message.value.content["about"] {
-        let key;
+    let (link_to_author_id, link_to_key_id) = match &content.about {
+        LinkId::Feed(feed_id) => {
+            let author_id = find_or_create_author(connection, feed_id).await?;
+            (Some(author_id), None)
+        }
+        LinkId::Msg(msg_id) => {
+            let msg_id = find_or_create_key(connection, msg_id).await?;
+            (None, Some(msg_id))
+        }
+        _ => (None, None),
+    };
 
-        let (link_to_author_id, link_to_key_id) = match about_key.get(0..1) {
-            Some("@") => {
-                key = find_or_create_author(connection, about_key).await?;
-                (Some(key), None)
-            }
-            Some("%") => {
-                key = find_or_create_key(connection, about_key).await?;
-                (None, Some(key))
-            }
-            _ => (None, None),
-        };
-
-        query("INSERT INTO abouts_raw (link_from_key_id, link_to_author_id, link_to_key_id) VALUES (?, ?, ?)")
-            .bind(&message_key_id)
-            .bind(&link_to_author_id)
-            .bind(&link_to_key_id)
-            .execute(connection)
-            .await?;
-    }
+    query("INSERT INTO abouts_raw (link_from_key_id, link_to_author_id, link_to_key_id) VALUES (?, ?, ?)")
+        .bind(&message_key_id)
+        .bind(&link_to_author_id)
+        .bind(&link_to_key_id)
+        .execute(connection)
+        .await?;
 
     Ok(())
 }

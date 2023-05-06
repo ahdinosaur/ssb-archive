@@ -1,9 +1,17 @@
 // https://github.com/ssbc/ssb-typescript
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{
+    de::{self, MapAccess, Visitor},
+    Deserialize, Deserializer, Serialize,
+};
 use serde_json::Value;
 use serde_with::serde_as;
-use std::{convert::TryFrom, marker::PhantomData};
+use std::{
+    convert::{Infallible, TryFrom},
+    fmt::{self, Display},
+    marker::PhantomData,
+    str::FromStr,
+};
 use thiserror::Error as ThisError;
 
 #[derive(Copy, Clone, Debug, ThisError)]
@@ -28,7 +36,7 @@ MissingField {
  */
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "String")]
-pub struct FeedId(String);
+pub struct FeedId(pub String);
 
 impl TryFrom<String> for FeedId {
     type Error = IdError;
@@ -45,9 +53,9 @@ impl TryFrom<String> for FeedId {
     }
 }
 
-impl From<FeedId> for String {
-    fn from(value: FeedId) -> String {
-        value.0
+impl From<&FeedId> for String {
+    fn from(value: &FeedId) -> String {
+        value.0.clone()
     }
 }
 
@@ -56,7 +64,7 @@ impl From<FeedId> for String {
  */
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "String")]
-pub struct MsgId(String);
+pub struct MsgId(pub String);
 
 impl TryFrom<String> for MsgId {
     type Error = IdError;
@@ -73,9 +81,9 @@ impl TryFrom<String> for MsgId {
     }
 }
 
-impl From<MsgId> for String {
-    fn from(value: MsgId) -> String {
-        value.0
+impl From<&MsgId> for String {
+    fn from(value: &MsgId) -> String {
+        value.0.clone()
     }
 }
 
@@ -84,7 +92,7 @@ impl From<MsgId> for String {
  */
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "String")]
-pub struct BlobId(String);
+pub struct BlobId(pub String);
 
 impl TryFrom<String> for BlobId {
     type Error = IdError;
@@ -101,9 +109,9 @@ impl TryFrom<String> for BlobId {
     }
 }
 
-impl From<BlobId> for String {
-    fn from(value: BlobId) -> String {
-        value.0
+impl From<&BlobId> for String {
+    fn from(value: &BlobId) -> String {
+        value.0.clone()
     }
 }
 
@@ -112,7 +120,7 @@ impl From<BlobId> for String {
  */
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "String")]
-pub struct HashtagId(String);
+pub struct HashtagId(pub String);
 
 impl TryFrom<String> for HashtagId {
     type Error = IdError;
@@ -129,9 +137,9 @@ impl TryFrom<String> for HashtagId {
     }
 }
 
-impl From<HashtagId> for String {
-    fn from(value: HashtagId) -> String {
-        value.0
+impl From<&HashtagId> for String {
+    fn from(value: &HashtagId) -> String {
+        value.0.clone()
     }
 }
 
@@ -165,8 +173,8 @@ impl TryFrom<String> for LinkId {
     }
 }
 
-impl From<LinkId> for String {
-    fn from(value: LinkId) -> String {
+impl From<&LinkId> for String {
+    fn from(value: &LinkId) -> String {
         match value {
             LinkId::Feed(id) => id.into(),
             LinkId::Msg(id) => id.into(),
@@ -192,7 +200,7 @@ pub struct MsgValue {
     #[serde(default = "MsgValue::default_hash")]
     pub hash: String,
     pub content: MsgContent,
-    // pub signature: String,
+    pub signature: String,
 }
 
 impl MsgValue {
@@ -212,10 +220,10 @@ pub enum MsgContent {
 #[serde(tag = "type")]
 pub enum MsgContentTyped {
     Post(PostContent),
-    /*
     Contact(ContactContent),
     Vote(VoteContent),
     About(AboutContent),
+    /*
     Blog(BlogContent),
     Alias(AliasContent),
     Gathering(GatheringContent),
@@ -242,30 +250,56 @@ pub struct Mention {
     pub name: Option<String>,
 }
 
-/*
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ContactContent {
-    contact: Option<FeedId>,
-    following: Option<bool>,
-    blocking: Option<bool>,
+    pub contact: Option<FeedId>,
+    pub following: Option<bool>,
+    pub blocking: Option<bool>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VoteContent {
-    vote: Vote,
+    pub vote: Vote,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Vote {
-    link: MsgId,
-    value: i32,
-    expression: String,
+    pub link: MsgId,
+    pub value: i32,
+    pub expression: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AboutContent {
-    about: FeedId,
-    name: Option<String>,
-    description: Option<String>,
-    image: Option<Image>,
+    pub about: LinkId,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    #[serde(deserialize_with = "deserialize_optional_image")]
+    pub image: Option<Image>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Image {
+    pub link: BlobId,
+    pub name: Option<String>,
+    pub size: Option<u64>,
+    pub image_type: Option<String>,
+}
+
+impl FromStr for Image {
+    type Err = IdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Image {
+            link: s.to_string().try_into()?,
+            name: None,
+            size: None,
+            image_type: None,
+        })
+    }
+}
+
+/*
 pub struct BlogContent {
     title: String,
     summary: String,
@@ -306,13 +340,6 @@ pub struct DateTime {
     silent: Option<bool>,
 }
 
-pub struct Image {
-    link: BlobId,
-    name: Option<String>,
-    size: Option<u64>,
-    type: Option<String>,
-}
-
 pub struct AttendeeContent {
     about: MsgId,
     attendee: Attendee,
@@ -323,6 +350,52 @@ pub struct Attendee {
     remove: Option<bool>,
 }
 */
+
+// https://serde.rs/string-or-struct.html
+// https://users.rust-lang.org/t/solved-serde-deserialize-with-for-option-s/12749/2
+
+#[derive(Debug, Deserialize)]
+struct WrappedImage(#[serde(deserialize_with = "deserialize_image")] Image);
+
+fn deserialize_optional_image<'de, D>(deserializer: D) -> Result<Option<Image>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<WrappedImage>::deserialize(deserializer)
+        .map(|opt_wrapped: Option<WrappedImage>| opt_wrapped.map(|wrapped: WrappedImage| wrapped.0))
+}
+
+fn deserialize_image<'de, D>(deserializer: D) -> Result<Image, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct DeserializeImage;
+
+    impl<'de> Visitor<'de> for DeserializeImage {
+        type Value = Image;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("string or map")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Image, E>
+        where
+            E: de::Error,
+        {
+            let image = FromStr::from_str(value).map_err(|err| E::custom(format!("{}", err)))?;
+            Ok(image)
+        }
+
+        fn visit_map<M>(self, map: M) -> Result<Image, M::Error>
+        where
+            M: MapAccess<'de>,
+        {
+            Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))
+        }
+    }
+
+    deserializer.deserialize_any(DeserializeImage)
+}
 
 #[cfg(test)]
 mod tests {

@@ -1,6 +1,6 @@
 use log::trace;
-use serde_json::Value;
 use sqlx::{query, Error, SqliteConnection};
+use ssb_core::MsgId;
 
 use crate::sql::*;
 
@@ -43,14 +43,10 @@ pub async fn create_links_views(connection: &mut SqliteConnection) -> Result<(),
 
 pub async fn insert_links(
     connection: &mut SqliteConnection,
-    links: &[&Value],
+    links: &[&MsgId],
     message_key_id: i64,
 ) -> Result<(), Error> {
-    for link in links
-        .iter()
-        .filter_map(|link| link.as_str())
-        .filter(|link| link.starts_with('%'))
-    {
+    for link in links {
         let link_id = find_or_create_key(&mut *connection, link).await?;
         query("INSERT INTO links_raw (link_from_key_id, link_to_key_id) VALUES (?, ?)")
             .bind(message_key_id)

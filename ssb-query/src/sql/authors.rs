@@ -7,7 +7,7 @@ pub async fn find_or_create_author(
     author: &FeedId,
 ) -> Result<i64, Error> {
     let result: Option<i64> = query("SELECT id FROM authors WHERE author=?1")
-        .bind(Into::<String>::into(author.clone()))
+        .bind(Into::<String>::into(author))
         .map(|row: SqliteRow| row.get(0))
         .fetch_optional(&mut *connection)
         .await?;
@@ -16,7 +16,7 @@ pub async fn find_or_create_author(
         Ok(found_author)
     } else {
         let created_author = query("INSERT INTO authors (author) VALUES (?)")
-            .bind(Into::<String>::into(author.clone()))
+            .bind(Into::<String>::into(author))
             .execute(&mut *connection)
             .await?;
 

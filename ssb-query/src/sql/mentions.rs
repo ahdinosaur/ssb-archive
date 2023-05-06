@@ -1,5 +1,6 @@
 use log::trace;
 use sqlx::{query, Error, SqliteConnection};
+use ssb_core::FeedId;
 
 use crate::sql::*;
 
@@ -21,15 +22,11 @@ pub async fn create_mentions_tables(connection: &mut SqliteConnection) -> Result
 
 pub async fn insert_mentions(
     connection: &mut SqliteConnection,
-    links: &[&Value],
+    links: &[&FeedId],
     message_key_id: i64,
 ) -> Result<(), Error> {
-    for link in links
-        .iter()
-        .filter_map(|link| link.as_str())
-        .filter(|link| link.starts_with('@'))
-    {
-        let link_id = find_or_create_key(&mut *connection, link).await?;
+    for link in links {
+        let link_id = find_or_create_author(&mut *connection, link).await?;
         query("INSERT INTO mentions_raw (link_from_key_id, link_to_author_id) VALUES (?, ?)")
             .bind(message_key_id)
             .bind(link_id)

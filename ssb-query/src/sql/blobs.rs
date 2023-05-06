@@ -1,12 +1,13 @@
 use log::trace;
 use sqlx::{query, sqlite::SqliteRow, Error, Row, SqliteConnection};
+use ssb_core::BlobId;
 
 pub async fn find_or_create_blob(
     connection: &mut SqliteConnection,
-    blob: &str,
+    blob_key: &BlobId,
 ) -> Result<i64, Error> {
     let result: Option<i64> = query("SELECT id FROM blobs WHERE blob=?")
-        .bind(blob)
+        .bind(Into::<String>::into(blob_key))
         .map(|row: SqliteRow| row.get(0))
         .fetch_optional(&mut *connection)
         .await?;
@@ -15,7 +16,7 @@ pub async fn find_or_create_blob(
         Ok(found_blob)
     } else {
         let created_blob = query("INSERT INTO blobs (blob) VALUES (?)")
-            .bind(blob)
+            .bind(Into::<String>::into(blob_key))
             .execute(&mut *connection)
             .await?;
 

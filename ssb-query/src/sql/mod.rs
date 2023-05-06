@@ -213,20 +213,28 @@ async fn append_item(
     seq: &Sequence,
     item: &[u8],
 ) -> Result<(), SqlError> {
-    let message: Msg = serde_json::from_slice(item).unwrap();
+    let msg: Msg = serde_json::from_slice(item).unwrap();
 
-    let (is_decrypted, message) = attempt_decryption(message, secret_keys);
+    let (is_decrypted, msg) = attempt_decryption(msg, secret_keys);
 
-    let message_key_id = find_or_create_key(connection, &message.key).await.unwrap();
+    let msg_key_id = find_or_create_key(connection, &msg.key).await.unwrap();
 
     // votes are a kind of backlink, but we want to put them in their own table.
-    match message.value.content {
+    match msg.value.content {
         MsgContent::Unknown(Value) => {}
-        MsgContent::Typed(MsgContentTyped::Post(post)) => {}
+        MsgContent::Typed(content) = {
+            match content {
+                MsgContentTyped::Post(post) => {}
+                MsgContentTyped::Contact(contact) => {},
+                MsgContentTyped::Vote(vote) => {
+                    insert_or_update_votes(connection, &msg, &vote).await?;
+                },
+                MsgContentTyped::About(about) => {},
+            }
+        }
     }
     match &message.value.content["type"] {
         Value::String(type_string) if type_string == "vote" => {
-            insert_or_update_votes(connection, &message).await?;
         }
         _ => {
             let mut links = Vec::new();

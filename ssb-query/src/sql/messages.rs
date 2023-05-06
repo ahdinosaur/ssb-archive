@@ -1,9 +1,9 @@
 use log::trace;
 use serde_json::Value;
 use sqlx::{query, Error, SqliteConnection};
+use ssb_core::Msg;
 
 use crate::sql::*;
-use crate::Msg;
 
 pub async fn insert_message(
     connection: &mut SqliteConnection,
