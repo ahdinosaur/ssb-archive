@@ -1,8 +1,5 @@
 use pulldown_cmark::{html, CowStr, Event, LinkType, Options, Parser, Tag};
-use ssb_ref::{
-    blob_id_data_urlsafe, feed_id_data_urlsafe, is_blob_id, is_feed_id, is_link_id, is_message_id,
-    link_id_multi_regex, message_id_data_urlsafe,
-};
+use ssb_ref::LinkRef;
 use std::borrow::Borrow;
 
 /*
@@ -37,14 +34,14 @@ fn render_links<'a>(events: impl Iterator<Item = Event<'a>>) -> impl Iterator<It
     events.map(move |event| match &event {
         Event::Start(tag) => match tag {
             Tag::Link(link_type, url, title) => {
-                if !is_link_id(url) {
+                if !LinkRef::is_match(url) {
                     return event;
                 }
                 let next_url = render_link_url(url);
                 Event::Start(Tag::Link(*link_type, next_url.into(), title.clone()))
             }
             Tag::Image(link_type, url, title) => {
-                if !is_link_id(url) {
+                if !LinkRef::is_match(url) {
                     return event;
                 }
                 let next_url = render_link_url(url);
@@ -54,14 +51,14 @@ fn render_links<'a>(events: impl Iterator<Item = Event<'a>>) -> impl Iterator<It
         },
         Event::End(tag) => match tag {
             Tag::Link(link_type, url, title) => {
-                if !is_link_id(url) {
+                if !LinkRef::is_match(url) {
                     return event;
                 }
                 let next_url = render_link_url(url);
                 Event::End(Tag::Link(*link_type, next_url.into(), title.clone()))
             }
             Tag::Image(link_type, url, title) => {
-                if !is_link_id(url) {
+                if !LinkRef::is_match(url) {
                     return event;
                 }
                 let next_url = render_link_url(url);
@@ -74,15 +71,7 @@ fn render_links<'a>(events: impl Iterator<Item = Event<'a>>) -> impl Iterator<It
 }
 
 fn render_link_url(url: &str) -> String {
-    if is_message_id(url) {
-        format!("/message/{}", message_id_data_urlsafe(url))
-    } else if is_feed_id(url) {
-        format!("/feed/{}", feed_id_data_urlsafe(url))
-    } else if is_blob_id(url) {
-        format!("/blob/{}", blob_id_data_urlsafe(url))
-    } else {
-        url.to_string()
-    }
+    LinkRef::from_string(url.to_string()).unwrap().to_page_url()
 }
 
 pub fn linkify<'a>(events: impl Iterator<Item = Event<'a>>) -> impl Iterator<Item = Event<'a>> {
@@ -120,7 +109,7 @@ fn linkify_text<'a>(text: CowStr<'a>) -> Vec<Event<'a>> {
 
     // message ids
     let mut last_match_end = 0;
-    for mat in link_id_multi_regex().find_iter(text.borrow()) {
+    for mat in LinkRef::multi_regex().find_iter(text.borrow()) {
         let range = mat.range();
         let match_start = range.start;
 
@@ -156,12 +145,12 @@ pub fn collect_links(text: &str) -> Vec<String> {
         match &event {
             Event::Start(tag) => match tag {
                 Tag::Link(_link_type, url, _title) => {
-                    if is_link_id(url) {
+                    if LinkRef::is_match(url) {
                         links.push(url.to_string());
                     }
                 }
                 Tag::Image(_link_type, url, _title) => {
-                    if is_link_id(url) {
+                    if LinkRef::is_match(url) {
                         links.push(url.to_string());
                     }
                 }
