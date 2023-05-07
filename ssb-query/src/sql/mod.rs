@@ -9,7 +9,7 @@ use sqlx::{
     sqlite::{SqliteConnection, SqliteRow},
     Connection, Error as SqlError, Row,
 };
-use ssb_core::{BlobLink, IdError, Link, MsgContentTyped};
+use ssb_core::{BlobLink, IdError, Link};
 use thiserror::Error as ThisError;
 
 pub use ssb_core::{Msg, MsgContent, MsgValue};
@@ -207,19 +207,21 @@ async fn append_item(
 
     let msg_key_id = find_or_create_key(connection, &msg.key).await.unwrap();
 
+    if !msg.value.content.is_object() {
+        // early return if content is not object
+        return Ok(());
+    }
+
     let content: MsgContent = from_value(msg.value.content.clone())?;
 
     match content {
-        MsgContent::Unknown(content) => {
-            println!("Unknown content: {:?}", content);
-        }
-        MsgContent::Typed(content) => match content {
-            MsgContentTyped::Post(post) => {
+        MsgContent::Post(post) => {
+            if let Some(mentions) = post.mentions {
                 let mut msg_keys = Vec::new();
                 let mut feed_keys = Vec::new();
                 let mut blob_keys = Vec::new();
                 let mut hashtag_keys = Vec::new();
-                for link in post.mentions.iter() {
+                for link in mentions.iter() {
                     match link {
                         Link::Msg { link, .. } => msg_keys.push(link),
                         Link::Feed { link, .. } => feed_keys.push(link),
@@ -230,72 +232,76 @@ async fn append_item(
                 insert_links(connection, msg_keys.as_slice(), msg_key_id).await?;
                 insert_mentions(connection, feed_keys.as_slice(), msg_key_id).await?;
                 insert_blob_links(connection, blob_keys.as_slice(), msg_key_id).await?;
+            }
 
-                let root_key_id = if let Some(root) = post.root {
-                    trace!("get root key id");
-                    Some(find_or_create_key(connection, &root).await?)
-                } else {
-                    None
-                };
-                let fork_key_id = if let Some(fork) = post.fork {
-                    trace!("get fork key id");
-                    Some(find_or_create_key(connection, &fork).await?)
-                } else {
-                    None
-                };
-                insert_message(
-                    connection,
-                    &msg,
-                    *seq as i64,
-                    msg_key_id,
-                    root_key_id,
-                    fork_key_id,
-                    is_decrypted,
-                )
-                .await?;
-                insert_branches(connection, post.branch.as_slice(), msg_key_id).await?;
+            let root_key_id = if let Some(root) = post.root {
+                trace!("get root key id");
+                Some(find_or_create_key(connection, &root).await?)
+            } else {
+                None
+            };
+            let fork_key_id = if let Some(fork) = post.fork {
+                trace!("get fork key id");
+                Some(find_or_create_key(connection, &fork).await?)
+            } else {
+                None
+            };
+            insert_message(
+                connection,
+                &msg,
+                *seq as i64,
+                msg_key_id,
+                root_key_id,
+                fork_key_id,
+                is_decrypted,
+            )
+            .await?;
+            if let Some(branch) = post.branch {
+                insert_branches(connection, branch.as_slice(), msg_key_id).await?;
             }
-            MsgContentTyped::Contact(contact) => {
-                insert_or_update_contacts(connection, &msg, &contact, msg_key_id, is_decrypted)
-                    .await?;
-                insert_message(
-                    connection,
-                    &msg,
-                    *seq as i64,
-                    msg_key_id,
-                    None,
-                    None,
-                    is_decrypted,
-                )
-                .await?;
-            }
-            MsgContentTyped::Vote(vote) => {
-                insert_or_update_votes(connection, &msg, &vote).await?;
-                insert_message(
-                    connection,
-                    &msg,
-                    *seq as i64,
-                    msg_key_id,
-                    None,
-                    None,
-                    is_decrypted,
-                )
-                .await?;
-            }
-            MsgContentTyped::About(about) => {
-                insert_abouts(connection, &msg, &about, msg_key_id).await?;
-                insert_message(
-                    connection,
-                    &msg,
-                    *seq as i64,
-                    msg_key_id,
-                    None,
-                    None,
-                    is_decrypted,
-                )
-                .await?;
-            }
-        },
+        }
+        MsgContent::Contact(contact) => {
+            insert_or_update_contacts(connection, &msg, &contact, msg_key_id, is_decrypted).await?;
+            insert_message(
+                connection,
+                &msg,
+                *seq as i64,
+                msg_key_id,
+                None,
+                None,
+                is_decrypted,
+            )
+            .await?;
+        }
+        MsgContent::Vote(vote) => {
+            insert_or_update_votes(connection, &msg, &vote).await?;
+            insert_message(
+                connection,
+                &msg,
+                *seq as i64,
+                msg_key_id,
+                None,
+                None,
+                is_decrypted,
+            )
+            .await?;
+        }
+        MsgContent::About(about) => {
+            insert_abouts(connection, &msg, &about, msg_key_id).await?;
+            insert_message(
+                connection,
+                &msg,
+                *seq as i64,
+                msg_key_id,
+                None,
+                None,
+                is_decrypted,
+            )
+            .await?;
+        }
+        MsgContent::Unknown => {
+            // println!("Unknown content: {:?}", msg.value.content);
+        }
     }
 
     Ok(())

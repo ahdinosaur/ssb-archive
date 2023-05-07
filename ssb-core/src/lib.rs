@@ -207,18 +207,15 @@ impl<Content> MsgValue<Content> {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum MsgContent {
-    Typed(MsgContentTyped),
-    Unknown(Value),
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
-pub enum MsgContentTyped {
+pub enum MsgContent {
+    #[serde(alias = "post")]
     Post(PostContent),
+    #[serde(alias = "contact")]
     Contact(ContactContent),
+    #[serde(alias = "vote")]
     Vote(VoteContent),
+    #[serde(alias = "about")]
     About(AboutContent),
     /*
     Blog(BlogContent),
@@ -227,6 +224,8 @@ pub enum MsgContentTyped {
     GatheringUpdate(GatheringUpdateContent),
     Attendee(AttendeeContent),
     */
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -254,11 +253,11 @@ pub struct BlobLink {
 pub struct PostContent {
     pub text: String,
     pub channel: Option<String>,
-    #[serde_as(as = "serde_with::OneOrMany<_>")]
-    pub mentions: Vec<Link>,
+    #[serde_as(as = "Option<serde_with::OneOrMany<_>>")]
+    pub mentions: Option<Vec<Link>>,
     pub root: Option<MsgId>,
-    #[serde_as(as = "serde_with::OneOrMany<_>")]
-    pub branch: Vec<MsgId>,
+    #[serde_as(as = "Option<serde_with::OneOrMany<_>>")]
+    pub branch: Option<Vec<MsgId>>,
     pub fork: Option<MsgId>,
 }
 
@@ -278,7 +277,7 @@ pub struct VoteContent {
 pub struct Vote {
     pub link: MsgId,
     pub value: i32,
-    pub expression: String,
+    pub expression: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -286,6 +285,7 @@ pub struct AboutContent {
     pub about: LinkId,
     pub name: Option<String>,
     pub description: Option<String>,
+    #[serde(default)]
     #[serde(deserialize_with = "deserialize_optional_blob_link")]
     pub image: Option<BlobLink>,
 }

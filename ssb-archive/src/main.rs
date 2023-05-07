@@ -17,8 +17,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     while view.get_log_latest().await != view.get_view_latest().await {
         println!("log latest: {:?}", view.get_log_latest().await);
         println!("view latest: {:?}", view.get_view_latest().await);
-        view.process(1).await?;
-        sleep(Duration::from_secs(1))
+        view.process(1000).await?;
+        // sleep(Duration::from_secs(1))
     }
 
     let feed_id: FeedId = "@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519"
