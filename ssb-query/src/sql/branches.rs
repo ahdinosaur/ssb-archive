@@ -11,7 +11,7 @@ pub async fn insert_branches(
 ) -> Result<(), Error> {
     for branch in branches.iter() {
         let link_to_msg_ref_id = find_or_create_msg_ref(&mut *connection, branch).await?;
-        query("INSERT INTO branches_raw (link_from_msg_ref_id, link_to_msg_ref_id) VALUES (?, ?)")
+        query("INSERT INTO branches (link_from_msg_ref_id, link_to_msg_ref_id) VALUES (?, ?)")
             .bind(&msg_ref_id)
             .bind(&link_to_msg_ref_id)
             .execute(&mut *connection)
@@ -25,7 +25,7 @@ pub async fn create_branches_tables(connection: &mut SqliteConnection) -> Result
     trace!("Creating branches tables");
 
     query(
-        "CREATE TABLE IF NOT EXISTS branches_raw (
+        "CREATE TABLE IF NOT EXISTS branches (
           id INTEGER PRIMARY KEY,
           link_from_msg_ref_id INTEGER,
           link_to_msg_ref_id INTEGER

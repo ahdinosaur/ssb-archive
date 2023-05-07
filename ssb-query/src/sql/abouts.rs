@@ -10,14 +10,27 @@ pub async fn create_abouts_tables(connection: &mut SqliteConnection) -> Result<(
     trace!("Creating abouts tables");
 
     query(
-        "CREATE TABLE IF NOT EXISTS abouts_raw (
+        "CREATE TABLE IF NOT EXISTS about_feeds (
           id INTEGER PRIMARY KEY,
-          link_from_msg_ref_id INTEGER,
+          feed_seq INTEGER,
+          link_from_feed_ref_id INTEGER,
           link_to_feed_ref_id INTEGER,
-          link_to_msg_ref_id INTEGER
+          content JSON
         )",
     )
-    .execute(connection)
+    .execute(&mut *connection)
+    .await?;
+
+    query(
+        "CREATE TABLE IF NOT EXISTS about_msgs (
+          id INTEGER PRIMARY KEY,
+          feed_seq INTEGER,
+          link_from_feed_ref_id INTEGER,
+          link_to_msg_ref_id INTEGER,
+          content JSON
+        )",
+    )
+    .execute(&mut *connection)
     .await?;
 
     Ok(())
@@ -25,74 +38,132 @@ pub async fn create_abouts_tables(connection: &mut SqliteConnection) -> Result<(
 
 pub async fn insert_abouts(
     connection: &mut SqliteConnection,
-    _msg: &Msg<Value>,
+    msg: &Msg<Value>,
     content: &AboutContent,
-    msg_ref_id: i64,
 ) -> Result<(), Error> {
-    let (link_to_feed_ref_id, link_to_msg_ref_id) = match &content.about {
+    let link_from_feed_ref_id =
+        find_or_create_feed_ref(&mut *connection, &msg.value.author).await?;
+
+    let mut json_content = msg.value.content.as_object().unwrap().clone();
+    json_content.remove("type");
+    json_content.remove("about");
+
+    match &content.about {
         LinkRef::Feed(feed_ref) => {
-            let feed_ref_id = find_or_create_feed_ref(connection, feed_ref).await?;
-            (Some(feed_ref_id), None)
+            let link_to_feed_ref_id = find_or_create_feed_ref(&mut *connection, feed_ref).await?;
+
+            let row: Option<(i64, i64, Value)> =
+                query("SELECT id, feed_seq, content FROM about_feeds WHERE link_from_feed_ref_id = ? AND link_to_feed_ref_id = ?")
+                    .bind(&link_from_feed_ref_id)
+                    .bind(&link_to_feed_ref_id)
+                    .map(|row: sqlx::sqlite::SqliteRow| (row.get(0), row.get(1), row.get(2)))
+                    .fetch_optional(&mut *connection)
+                    .await?;
+
+            if let Some((id, feed_seq, db_content)) = row {
+                if feed_seq < msg.value.sequence as i64 {
+                    for (key, value) in db_content.as_object().unwrap().iter() {
+                        json_content.insert(key.clone(), value.clone());
+                    }
+                    query("UPDATE about_feeds SET content = ? WHERE id = ?")
+                        .bind(Value::Object(json_content))
+                        .bind(id)
+                        .execute(connection)
+                        .await?;
+                }
+            } else {
+                query(
+                    "
+                    INSERT INTO about_feeds (
+                        feed_seq,
+                        link_from_feed_ref_id,
+                        link_to_feed_ref_id,
+                        content
+                    ) VALUES (?, ?, ?, ?)
+                    ",
+                )
+                .bind(msg.value.sequence as i64)
+                .bind(&link_from_feed_ref_id)
+                .bind(&link_to_feed_ref_id)
+                .bind(Value::Object(json_content))
+                .execute(connection)
+                .await?;
+            }
         }
         LinkRef::Msg(msg_ref) => {
-            let msg_ref_id = find_or_create_msg_ref(connection, msg_ref).await?;
-            (None, Some(msg_ref_id))
-        }
-        _ => (None, None),
-    };
+            let link_to_msg_ref_id = find_or_create_msg_ref(connection, msg_ref).await?;
 
-    query("INSERT INTO abouts_raw (link_from_msg_ref_id, link_to_feed_ref_id, link_to_msg_ref_id) VALUES (?, ?, ?)")
-        .bind(&msg_ref_id)
-        .bind(&link_to_feed_ref_id)
-        .bind(&link_to_msg_ref_id)
-        .execute(connection)
-        .await?;
+            let row: Option<(i64, i64, Value)> =
+                query("SELECT id, feed_seq, content FROM about_msgs WHERE link_from_feed_ref_id = ? AND link_to_msg_ref_id = ?")
+                    .bind(&link_from_feed_ref_id)
+                    .bind(&link_to_msg_ref_id)
+                    .map(|row: sqlx::sqlite::SqliteRow| (row.get(0), row.get(1), row.get(2)))
+                    .fetch_optional(&mut *connection)
+                    .await?;
+
+            if let Some((id, feed_seq, db_content)) = row {
+                if feed_seq < msg.value.sequence as i64 {
+                    for (key, value) in db_content.as_object().unwrap().iter() {
+                        json_content.insert(key.clone(), value.clone());
+                    }
+                    query("UPDATE about_feeds SET content = ? WHERE id = ?")
+                        .bind(Value::Object(json_content))
+                        .bind(id)
+                        .execute(connection)
+                        .await?;
+                }
+            } else {
+                query(
+                    "
+                    INSERT INTO about_msgs (
+                        feed_seq,
+                        link_from_feed_ref_id,
+                        link_to_msg_ref_id,
+                        content
+                    ) VALUES (?, ?, ?, ?)
+                    ",
+                )
+                .bind(msg.value.sequence as i64)
+                .bind(&link_from_feed_ref_id)
+                .bind(&link_to_msg_ref_id)
+                .bind(Value::Object(json_content))
+                .execute(connection)
+                .await?;
+            }
+        }
+        _ => {}
+    };
 
     Ok(())
 }
 
 pub async fn create_abouts_indices(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating abouts index");
+
+    // about feeds
+
     query(
-        "CREATE INDEX IF NOT EXISTS abouts_from_msg_ref_id_index on abouts_raw (link_from_msg_ref_id)",
+        "CREATE INDEX IF NOT EXISTS about_feeds_from_feed_ref_id_index on about_feeds (link_from_feed_ref_id)",
     )
     .execute(&mut *connection)
     .await?;
-    query(
-        "CREATE INDEX IF NOT EXISTS abouts_to_msg_ref_id_index on abouts_raw (link_to_msg_ref_id)",
-    )
-    .execute(&mut *connection)
-    .await?;
-    query("CREATE INDEX IF NOT EXISTS abouts_to_feed_ref_id_index on abouts_raw (link_to_feed_ref_id )")
+
+    query("CREATE INDEX IF NOT EXISTS about_feeds_to_feed_ref_id_index on about_feeds (link_to_feed_ref_id)")
         .execute(&mut *connection)
         .await?;
-    Ok(())
-}
 
-pub async fn create_abouts_views(connection: &mut SqliteConnection) -> Result<(), Error> {
-    trace!("Creating abouts views");
-    //resolve all the links, get the content of the msg.
+    // about msgs
+
     query(
-        "
-        CREATE VIEW IF NOT EXISTS abouts AS
-        SELECT 
-            abouts_raw.id as id, 
-            abouts_raw.link_from_msg_ref_id as link_from_msg_ref_id, 
-            abouts_raw.link_to_msg_ref_id as link_to_msg_ref_id, 
-            abouts_raw.link_to_feed_ref_id as link_to_feed_ref_id, 
-            msg_refs_from.msg_ref as link_from_msg_ref, 
-            msg_refs_to.msg_ref as link_to_msg_ref, 
-            feed_refs_to.feed_ref as link_to_feed_ref,
-            msgs.content as content,
-            msgs.feed_ref as link_from_feed_ref
-        FROM abouts_raw 
-        JOIN msg_refs AS msg_refs_from ON msg_refs_from.id = abouts_raw.link_from_msg_ref_id
-        JOIN msgs ON link_from_msg_ref_id = msgs.msg_ref_id
-        LEFT JOIN msg_refs AS msg_refs_to ON msg_refs_to.id = abouts_raw.link_to_msg_ref_id
-        LEFT JOIN feed_refs AS feed_refs_to ON feed_refs_to.id=abouts_raw.link_to_feed_ref_id
-        ",
+        "CREATE INDEX IF NOT EXISTS about_msgs_from_feed_ref_id_index on about_msgs (link_from_feed_ref_id)",
     )
-    .execute(connection)
+    .execute(&mut *connection)
+    .await?;
+
+    query(
+        "CREATE INDEX IF NOT EXISTS about_msgs_to_msg_ref_id_index on about_msgs (link_to_msg_ref_id )",
+    )
+    .execute(&mut *connection)
     .await?;
 
     Ok(())

@@ -8,7 +8,7 @@ use crate::sql::*;
 pub async fn insert_msg(
     connection: &mut SqliteConnection,
     msg: &Msg<Value>,
-    seq: i64,
+    log_seq: i64,
     msg_ref_id: i64,
     root_msg_ref_id: Option<i64>,
     fork_msg_ref_id: Option<i64>,
@@ -19,12 +19,12 @@ pub async fn insert_msg(
 
     trace!("insert msg");
     query(
-        "INSERT INTO msgs_raw (
-            flume_seq,
+        "INSERT INTO msgs (
             msg_ref_id,
-            seq,
-            received_time,
-            asserted_time,
+            log_seq,
+            feed_seq,
+            timestamp_received,
+            timestamp_asserted,
             root_msg_ref_id,
             fork_msg_ref_id,
             feed_ref_id,
@@ -33,8 +33,8 @@ pub async fn insert_msg(
             is_decrypted
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
-    .bind(seq)
     .bind(msg_ref_id)
+    .bind(log_seq)
     .bind(msg.value.sequence as i64)
     .bind(msg.timestamp_received)
     .bind(msg.value.timestamp_asserted)
@@ -51,14 +51,14 @@ pub async fn insert_msg(
 }
 
 pub async fn create_msgs_tables(connection: &mut SqliteConnection) -> Result<(), Error> {
-    trace!("Creating msgs_raw tables");
+    trace!("Creating msgs tables");
     query(
-        "CREATE TABLE IF NOT EXISTS msgs_raw (
-          flume_seq INTEGER PRIMARY KEY,
+        "CREATE TABLE IF NOT EXISTS msgs (
           msg_ref_id INTEGER UNIQUE, 
-          seq INTEGER,
-          received_time REAL,
-          asserted_time REAL,
+          log_seq INTEGER PRIMARY KEY,
+          feed_seq INTEGER,
+          timestamp_received REAL,
+          timestamp_asserted REAL,
           root_msg_ref_id INTEGER,
           fork_msg_ref_id INTEGER,
           feed_ref_id INTEGER,
@@ -66,40 +66,6 @@ pub async fn create_msgs_tables(connection: &mut SqliteConnection) -> Result<(),
           content JSON,
           is_decrypted BOOLEAN
         )",
-    )
-    .execute(connection)
-    .await?;
-
-    Ok(())
-}
-
-pub async fn create_msgs_views(connection: &mut SqliteConnection) -> Result<(), Error> {
-    trace!("Creating msgs views");
-    query(
-        "
-        CREATE VIEW IF NOT EXISTS msgs AS
-        SELECT 
-            flume_seq,
-            msg_ref_id,
-            seq,
-            received_time,
-            asserted_time,
-            root_msg_ref_id,
-            fork_msg_ref_id,
-            feed_ref_id,
-            content,
-            content_type,
-            is_decrypted,
-            msg_refs.msg_ref as msg_ref,
-            root_msg_refs.msg_ref as root_msg_ref,
-            fork_msg_refs.msg_ref as fork_msg_ref,
-            feed_refs.feed_ref as feed_ref
-        FROM msgs_raw 
-        JOIN msg_refs ON msg_refs.id = msgs_raw.msg_ref_id
-        LEFT JOIN msg_refs AS root_msg_refs ON root_msg_refs.id = msgs_raw.root_msg_ref_id
-        LEFT JOIN msg_refs AS fork_msg_refs ON fork_msg_refs.id = msgs_raw.fork_msg_ref_id
-        JOIN feed_refs ON feed_refs.id = msgs_raw.feed_ref_id
-        ",
     )
     .execute(connection)
     .await?;
@@ -120,7 +86,7 @@ pub async fn create_msgs_indices(connection: &mut SqliteConnection) -> Result<()
 
 async fn create_feed_ref_index(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating feed_ref index");
-    query("CREATE INDEX IF NOT EXISTS msgs_feed_ref_id_index on msgs_raw (feed_ref_id)")
+    query("CREATE INDEX IF NOT EXISTS msgs_feed_ref_id_index on msgs (feed_ref_id)")
         .execute(connection)
         .await?;
 
@@ -129,7 +95,7 @@ async fn create_feed_ref_index(connection: &mut SqliteConnection) -> Result<(), 
 
 async fn create_root_index(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating root index");
-    query("CREATE INDEX IF NOT EXISTS msgs_root_msg_ref_id_index on msgs_raw (root_msg_ref_id)")
+    query("CREATE INDEX IF NOT EXISTS msgs_root_msg_ref_id_index on msgs (root_msg_ref_id)")
         .execute(connection)
         .await?;
 
@@ -138,7 +104,7 @@ async fn create_root_index(connection: &mut SqliteConnection) -> Result<(), Erro
 
 async fn create_fork_index(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating fork index");
-    query("CREATE INDEX IF NOT EXISTS msgs_fork_msg_ref_id_index on msgs_raw (fork_msg_ref_id)")
+    query("CREATE INDEX IF NOT EXISTS msgs_fork_msg_ref_id_index on msgs (fork_msg_ref_id)")
         .execute(connection)
         .await?;
 
@@ -147,7 +113,7 @@ async fn create_fork_index(connection: &mut SqliteConnection) -> Result<(), Erro
 
 async fn create_content_type_index(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating content type index");
-    query("CREATE INDEX IF NOT EXISTS msgs_content_type_index on msgs_raw (content_type)")
+    query("CREATE INDEX IF NOT EXISTS msgs_content_type_index on msgs (content_type)")
         .execute(connection)
         .await?;
 

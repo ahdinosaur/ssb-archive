@@ -79,7 +79,6 @@ impl SqlView {
 
             create_tables(&mut connection).await?;
             create_indices(&mut connection).await?;
-            create_views(&mut connection).await?;
 
             set_db_version(&mut connection).await?;
         }
@@ -93,13 +92,12 @@ impl SqlView {
     }
 
     pub async fn get_seq_by_key(&mut self, key: &str) -> Result<i64, SqlViewError> {
-        let result: i64 = query(
-            "SELECT flume_seq FROM msgs_raw JOIN keys ON msgs_raw.key_id=keys.id WHERE keys.key=?1",
-        )
-        .bind(key)
-        .map(|row: SqliteRow| row.get(0))
-        .fetch_one(&mut self.connection)
-        .await?;
+        let result: i64 =
+            query("SELECT log_seq FROM msgs JOIN keys ON msgs.key_id=keys.id WHERE keys.key=?1")
+                .bind(key)
+                .map(|row: SqliteRow| row.get(0))
+                .fetch_one(&mut self.connection)
+                .await?;
 
         Ok(result)
     }
@@ -140,7 +138,7 @@ impl SqlView {
     }
 
     pub async fn get_latest(&mut self) -> Result<Option<Sequence>, SqlViewError> {
-        let res: Option<i64> = query("SELECT MAX(flume_seq) FROM msgs_raw")
+        let res: Option<i64> = query("SELECT MAX(log_seq) FROM msgs")
             .map(|row: SqliteRow| row.get(0))
             .fetch_optional(&mut self.connection)
             .await?;
@@ -198,8 +196,8 @@ async fn append_item(
         Ok(content) => content,
         Err(error) => {
             // early return if content is misformatted
-            eprintln!("Error: {}", error);
-            eprintln!("-> Content: {:?}", msg.value.content);
+            // eprintln!("Error: {}", error);
+            // eprintln!("-> Content: {:?}", msg.value.content);
             // return Err(error.into());
             return Ok(());
         }
@@ -278,7 +276,7 @@ async fn append_item(
             .await?;
         }
         MsgContent::About(about) => {
-            insert_abouts(connection, &msg, &about, msg_ref_id).await?;
+            insert_abouts(connection, &msg, &about).await?;
             insert_msg(
                 connection,
                 &msg,
@@ -325,15 +323,6 @@ async fn create_tables(connection: &mut SqliteConnection) -> Result<(), SqlError
     Ok(())
 }
 
-async fn create_views(connection: &mut SqliteConnection) -> Result<(), SqlError> {
-    create_msgs_views(connection).await?;
-    create_msg_links_views(connection).await?;
-    create_blob_links_views(connection).await?;
-    create_abouts_views(connection).await?;
-    create_votes_indices(connection).await?;
-    Ok(())
-}
-
 async fn create_indices(connection: &mut SqliteConnection) -> Result<(), SqlError> {
     create_msgs_indices(connection).await?;
     create_msg_refs_indices(connection).await?;
@@ -344,6 +333,7 @@ async fn create_indices(connection: &mut SqliteConnection) -> Result<(), SqlErro
     create_contacts_indices(connection).await?;
     create_branches_indices(connection).await?;
     create_abouts_indices(connection).await?;
+    create_votes_indices(connection).await?;
     Ok(())
 }
 

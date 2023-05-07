@@ -58,14 +58,14 @@ async fn exec() -> Result<(), Error> {
     let feed_ref: FeedRef = "@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519"
         .to_owned()
         .try_into()?;
-    let max_seq = view.select_max_seq_by_feed(&feed_ref).await.unwrap();
+    let max_feed_seq = view.select_max_seq_by_feed(&feed_ref).await.unwrap();
 
     let messages = view
         .select_all_msgs_by_feed(SelectAllMsgsByFeedOptions {
             feed_ref: &feed_ref,
             content_type: "post",
             page_size: 10,
-            less_than_seq: max_seq + 1,
+            less_than_feed_seq: max_feed_seq + 1,
             is_decrypted: false,
         })
         .await?;
