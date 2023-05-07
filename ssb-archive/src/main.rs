@@ -32,10 +32,27 @@ async fn exec() -> Result<(), Error> {
     )
     .await?;
 
-    while view.get_log_latest().await != view.get_view_latest().await {
+    loop {
+        let log_latest = view.get_log_latest().await;
+        let view_latest = view.get_view_latest().await;
+        match (log_latest, view_latest) {
+            (Some(log_offset), Some(view_offset)) => {
+                // HACK: handle cases where we aren't
+                //   able to process the last few messages.
+                //   (presumably because encrypted)
+                if log_offset < view_offset + 10_000 {
+                    break;
+                }
+                // otherwise would be:
+                // if log_offset == view_offset {
+                //     break;
+                // }
+            }
+            _ => {}
+        }
         println!("log latest: {:?}", view.get_log_latest().await);
         println!("view latest: {:?}", view.get_view_latest().await);
-        view.process(20000).await?;
+        view.process(20_000).await?;
         // sleep(Duration::from_secs(1))
     }
 
