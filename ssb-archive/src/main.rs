@@ -1,8 +1,8 @@
 // use std::{thread::sleep, time::Duration};
 
-use ssb_core::{FeedId, IdError};
+use ssb_core::{FeedKey, KeyError};
 use ssb_markdown::render;
-use ssb_query::{sql::SqlViewError, SelectAllMessagesByFeedOptions, SsbQuery};
+use ssb_query::{sql::SqlViewError, SelectAllMsgsByFeedOptions, SsbQuery};
 use thiserror::Error as ThisError;
 
 #[tokio::main]
@@ -19,8 +19,8 @@ async fn main() {
 enum Error {
     #[error("Query error: {0}")]
     Query(#[from] SqlViewError),
-    #[error("Id format error: {0}")]
-    IdFormat(#[from] IdError),
+    #[error("Key format error: {0}")]
+    KeyFormat(#[from] KeyError),
 }
 
 async fn exec() -> Result<(), Error> {
@@ -39,14 +39,14 @@ async fn exec() -> Result<(), Error> {
         // sleep(Duration::from_secs(1))
     }
 
-    let feed_id: FeedId = "@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519"
+    let feed_key: FeedKey = "@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519"
         .to_owned()
         .try_into()?;
-    let max_seq = view.select_max_seq_by_feed(&feed_id).await.unwrap();
+    let max_seq = view.select_max_seq_by_feed(&feed_key).await.unwrap();
 
     let messages = view
-        .select_all_messages_by_feed(SelectAllMessagesByFeedOptions {
-            feed_id: &feed_id,
+        .select_all_msgs_by_feed(SelectAllMsgsByFeedOptions {
+            feed_key: &feed_key,
             content_type: "post",
             page_size: 10,
             less_than_seq: max_seq + 1,

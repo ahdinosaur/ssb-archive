@@ -9,37 +9,35 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqliteRow},
     ConnectOptions, Connection, Error as SqlError, Row,
 };
-use ssb_core::{BlobLink, IdError, Link};
+use ssb_core::{BlobLink, KeyError, Link, Msg, MsgContent, MsgValue};
 use std::str::FromStr;
 use thiserror::Error as ThisError;
 
-pub use ssb_core::{Msg, MsgContent, MsgValue};
-
 mod abouts;
-mod authors;
+mod blob_keys;
 mod blob_links;
-mod blobs;
 mod branches;
 mod contacts;
-mod keys;
-mod links;
-mod mentions;
-mod messages;
+mod feed_keys;
+mod feed_links;
 mod migrations;
+mod msg_keys;
+mod msg_links;
+mod msgs;
 mod queries;
 mod votes;
 use self::abouts::*;
-use self::authors::*;
+use self::blob_keys::*;
 use self::blob_links::*;
-use self::blobs::*;
 use self::branches::*;
 use self::contacts::*;
-use self::keys::*;
-use self::links::*;
-use self::mentions::*;
-use self::messages::*;
+use self::feed_keys::*;
+use self::feed_links::*;
 use self::migrations::*;
-pub use self::queries::SelectAllMessagesByFeedOptions;
+use self::msg_keys::*;
+use self::msg_links::*;
+use self::msgs::*;
+pub use self::queries::SelectAllMsgsByFeedOptions;
 pub(crate) use self::queries::*;
 use self::votes::*;
 
@@ -52,7 +50,7 @@ pub enum SqlViewError {
     #[error("Json error: {0}")]
     Json(#[from] JsonError),
     #[error("Id format error: {0}")]
-    IdFormat(#[from] IdError),
+    IdFormat(#[from] KeyError),
 }
 
 pub struct SqlView {
@@ -98,10 +96,13 @@ impl SqlView {
     }
 
     pub async fn get_seq_by_key(&mut self, key: &str) -> Result<i64, SqlViewError> {
-        let result: i64 = query("SELECT flume_seq FROM messages_raw JOIN keys ON messages_raw.key_id=keys.id WHERE keys.key=?1")
-            .bind(key)
-            .map(|row: SqliteRow| row.get(0))
-            .fetch_one(&mut self.connection).await?;
+        let result: i64 = query(
+            "SELECT flume_seq FROM msgs_raw JOIN keys ON msgs_raw.key_id=keys.id WHERE keys.key=?1",
+        )
+        .bind(key)
+        .map(|row: SqliteRow| row.get(0))
+        .fetch_one(&mut self.connection)
+        .await?;
 
         Ok(result)
     }
@@ -142,7 +143,7 @@ impl SqlView {
     }
 
     pub async fn get_latest(&mut self) -> Result<Option<Sequence>, SqlViewError> {
-        let res: Option<i64> = query("SELECT MAX(flume_seq) FROM messages_raw")
+        let res: Option<i64> = query("SELECT MAX(flume_seq) FROM msgs_raw")
             .map(|row: SqliteRow| row.get(0))
             .fetch_optional(&mut self.connection)
             .await?;
@@ -153,10 +154,10 @@ impl SqlView {
     }
 }
 
-fn attempt_decryption(mut message: Msg<Value>, secret_keys: &[Keypair]) -> (bool, Msg<Value>) {
+fn attempt_decryption(mut msg: Msg<Value>, secret_keys: &[Keypair]) -> (bool, Msg<Value>) {
     let mut is_decrypted = false;
 
-    if let Value::String(ref content) = message.value.content {
+    if let Value::String(ref content) = msg.value.content {
         let string = content.trim_end_matches(".box");
 
         let decoded = b64.decode(string);
@@ -165,7 +166,7 @@ fn attempt_decryption(mut message: Msg<Value>, secret_keys: &[Keypair]) -> (bool
                 if let Some(decrypted) = private_box::decrypt(&bytes, secret_key) {
                     is_decrypted = true;
                     if let Ok(new_content) = serde_json::from_slice(&decrypted) {
-                        message.value.content = new_content;
+                        msg.value.content = new_content;
                     }
                     break;
                 }
@@ -173,7 +174,7 @@ fn attempt_decryption(mut message: Msg<Value>, secret_keys: &[Keypair]) -> (bool
         }
     };
 
-    (is_decrypted, message)
+    (is_decrypted, msg)
 }
 
 async fn append_item(
@@ -186,7 +187,7 @@ async fn append_item(
 
     let (is_decrypted, msg) = attempt_decryption(msg, secret_keys);
 
-    let msg_key_id = find_or_create_key(connection, &msg.key).await.unwrap();
+    let msg_key_id = find_or_create_msg_key(connection, &msg.key).await.unwrap();
 
     if !msg.value.content.is_object() {
         // early return if content is not object
@@ -209,12 +210,12 @@ async fn append_item(
 
     match content {
         MsgContent::Post(post) => {
-            if let Some(mentions) = post.mentions {
+            if let Some(links) = post.mentions {
                 let mut msg_keys = Vec::new();
                 let mut feed_keys = Vec::new();
                 let mut blob_keys = Vec::new();
                 let mut hashtag_keys = Vec::new();
-                for link in mentions.iter() {
+                for link in links.iter() {
                     match link {
                         Link::Msg { link, .. } => msg_keys.push(link),
                         Link::Feed { link, .. } => feed_keys.push(link),
@@ -223,23 +224,23 @@ async fn append_item(
                     }
                 }
                 insert_links(connection, msg_keys.as_slice(), msg_key_id).await?;
-                insert_mentions(connection, feed_keys.as_slice(), msg_key_id).await?;
+                insert_feed_links(connection, feed_keys.as_slice(), msg_key_id).await?;
                 insert_blob_links(connection, blob_keys.as_slice(), msg_key_id).await?;
             }
 
             let root_key_id = if let Some(root) = post.root {
                 trace!("get root key id");
-                Some(find_or_create_key(connection, &root).await?)
+                Some(find_or_create_msg_key(connection, &root).await?)
             } else {
                 None
             };
             let fork_key_id = if let Some(fork) = post.fork {
                 trace!("get fork key id");
-                Some(find_or_create_key(connection, &fork).await?)
+                Some(find_or_create_msg_key(connection, &fork).await?)
             } else {
                 None
             };
-            insert_message(
+            insert_msg(
                 connection,
                 &msg,
                 *seq as i64,
@@ -255,7 +256,7 @@ async fn append_item(
         }
         MsgContent::Contact(contact) => {
             insert_or_update_contacts(connection, &msg, &contact, msg_key_id, is_decrypted).await?;
-            insert_message(
+            insert_msg(
                 connection,
                 &msg,
                 *seq as i64,
@@ -268,7 +269,7 @@ async fn append_item(
         }
         MsgContent::Vote(vote) => {
             insert_or_update_votes(connection, &msg, &vote).await?;
-            insert_message(
+            insert_msg(
                 connection,
                 &msg,
                 *seq as i64,
@@ -281,7 +282,7 @@ async fn append_item(
         }
         MsgContent::About(about) => {
             insert_abouts(connection, &msg, &about, msg_key_id).await?;
-            insert_message(
+            insert_msg(
                 connection,
                 &msg,
                 *seq as i64,
@@ -312,41 +313,40 @@ async fn set_pragmas(connection: &mut SqliteConnection) -> Result<(), SqlError> 
 
 async fn create_tables(connection: &mut SqliteConnection) -> Result<(), SqlError> {
     create_migrations_tables(connection).await?;
-    create_messages_tables(connection).await?;
-    create_authors_tables(connection).await?;
-    create_keys_tables(connection).await?;
-    create_links_tables(connection).await?;
+    create_msgs_tables(connection).await?;
+    create_msg_keys_tables(connection).await?;
+    create_msg_links_tables(connection).await?;
+    create_feed_keys_tables(connection).await?;
+    create_feed_links_tables(connection).await?;
+    create_blob_keys_tables(connection).await?;
+    create_blob_links_tables(connection).await?;
     create_contacts_tables(connection).await?;
     create_branches_tables(connection).await?;
-    create_mentions_tables(connection).await?;
     create_abouts_tables(connection).await?;
-    create_blobs_tables(connection).await?;
-    create_blob_links_tables(connection).await?;
     create_votes_tables(connection).await?;
 
     Ok(())
 }
 
 async fn create_views(connection: &mut SqliteConnection) -> Result<(), SqlError> {
-    create_messages_views(connection).await?;
-    create_links_views(connection).await?;
+    create_msgs_views(connection).await?;
+    create_msg_links_views(connection).await?;
     create_blob_links_views(connection).await?;
     create_abouts_views(connection).await?;
-    create_mentions_views(connection).await?;
     create_votes_indices(connection).await?;
     Ok(())
 }
 
 async fn create_indices(connection: &mut SqliteConnection) -> Result<(), SqlError> {
-    create_messages_indices(connection).await?;
-    create_links_indices(connection).await?;
+    create_msgs_indices(connection).await?;
+    create_msg_keys_indices(connection).await?;
+    create_msg_links_indices(connection).await?;
+    create_feed_keys_indices(connection).await?;
+    create_feed_links_indices(connection).await?;
     create_blob_links_indices(connection).await?;
     create_contacts_indices(connection).await?;
-    create_keys_indices(connection).await?;
     create_branches_indices(connection).await?;
-    create_authors_indices(connection).await?;
     create_abouts_indices(connection).await?;
-    create_mentions_indices(connection).await?;
     Ok(())
 }
 
@@ -394,7 +394,7 @@ mod test {
   "key": "%KKPLj1tWfuVhCvgJz2hG/nIsVzmBRzUJaqHv+sb+n1c=.sha256",
   "value": {
     "previous": "%xsMQA2GrsZew0GSxmDSBaoxDafVaUJ07YVaDGcp65a4=.sha256",
-    "author": "@QlCTpvY7p9ty2yOFrv1WU1AE88aoQc4Y7wYal7PFc+w=.ed25519",
+    "feed_key": "@QlCTpvY7p9ty2yOFrv1WU1AE88aoQc4Y7wYal7PFc+w=.ed25519",
     "sequence": 4797,
     "timestamp": 1543958997985,
     "hash": "sha256",
@@ -409,7 +409,7 @@ mod test {
       "channel": null,
       "recps": null,
       "text": "If I understand correctly, cjdns overlaying over old IP (which is basically all of the cjdns uses so far) still requires old IP addresses to introduce you to the cjdns network, so the chicken and egg problem is still there.",
-      "mentions": []
+      "feed_links": []
     },
     "signature": "mi5j/buYZdsiH8l6CVWRqdBKe+0UG6tVTOoVVjMhYl38Nkmb8wiIEfe7zu0JWuiHkaAIq+0/ZqYr6aV14j4fAw==.sig.ed25519"
   },

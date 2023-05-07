@@ -47,8 +47,8 @@ pub async fn insert_or_update_contacts(
         0
     };
 
-    let author_id = find_or_create_author(connection, &msg.value.author).await?;
-    let contact_author_id = find_or_create_author(connection, &content.contact).await?;
+    let author_id = find_or_create_feed_key(connection, &msg.value.author).await?;
+    let contact_author_id = find_or_create_feed_key(connection, &content.contact).await?;
 
     let row: Option<i64> = query(
         "SELECT id FROM contacts_raw WHERE author_id = ? AND contact_author_id = ? AND is_decrypted = ?",

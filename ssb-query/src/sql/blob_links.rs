@@ -1,6 +1,6 @@
 use log::trace;
 use sqlx::{query, Error, SqliteConnection};
-use ssb_core::BlobId;
+use ssb_core::BlobKey;
 
 use crate::sql::*;
 
@@ -43,14 +43,14 @@ pub async fn create_blob_links_views(connection: &mut SqliteConnection) -> Resul
 
 pub async fn insert_blob_links(
     connection: &mut SqliteConnection,
-    blob_keys: &[&BlobId],
+    blob_keys: &[&BlobKey],
     message_key_id: i64,
 ) -> Result<(), Error> {
     for blob_key in blob_keys.iter() {
-        let blob_id = find_or_create_blob(&mut *connection, blob_key).await?;
+        let blob_key_id = find_or_create_blob_key(&mut *connection, blob_key).await?;
         query("INSERT INTO blob_links_raw (link_from_key_id, link_to_blob_id) VALUES (?, ?)")
             .bind(&message_key_id)
-            .bind(&blob_id)
+            .bind(&blob_key_id)
             .execute(&mut *connection)
             .await?;
     }

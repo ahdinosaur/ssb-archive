@@ -1,10 +1,10 @@
 use log::trace;
 use sqlx::{query, sqlite::SqliteRow, Error, Row, SqliteConnection};
-use ssb_core::BlobId;
+use ssb_core::BlobKey;
 
-pub async fn find_or_create_blob(
+pub async fn find_or_create_blob_key(
     connection: &mut SqliteConnection,
-    blob_key: &BlobId,
+    blob_key: &BlobKey,
 ) -> Result<i64, Error> {
     let result: Option<i64> = query("SELECT id FROM blobs WHERE blob=?")
         .bind(Into::<String>::into(blob_key))
@@ -24,8 +24,8 @@ pub async fn find_or_create_blob(
     }
 }
 
-pub async fn create_blobs_tables(connection: &mut SqliteConnection) -> Result<(), Error> {
-    trace!("Creating blobs tables");
+pub async fn create_blob_keys_tables(connection: &mut SqliteConnection) -> Result<(), Error> {
+    trace!("Creating blob_keys tables");
 
     query(
         "CREATE TABLE IF NOT EXISTS blobs (

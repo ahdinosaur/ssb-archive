@@ -26,8 +26,8 @@ pub async fn insert_or_update_votes(
     msg: &Msg<Value>,
     content: &VoteContent,
 ) -> Result<(), Error> {
-    let author_id = find_or_create_author(connection, &msg.value.author).await?;
-    let link_to_key_id = find_or_create_key(connection, &content.vote.link).await?;
+    let author_id = find_or_create_feed_key(connection, &msg.value.author).await?;
+    let link_to_key_id = find_or_create_msg_key(connection, &content.vote.link).await?;
 
     if content.vote.value == 1 {
         query("INSERT INTO votes_raw (link_from_author_id, link_to_key_id) VALUES (?, ?)")
