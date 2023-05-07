@@ -835,6 +835,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashtag-regex"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9b2fdf74a9bd7d03c4a7bfc2620f2d00177a457be3b1b149c215a34ce86eb98"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1907,21 +1916,12 @@ name = "ssb-archive"
 version = "0.1.0"
 dependencies = [
  "serde_json",
- "ssb-core",
  "ssb-markdown",
+ "ssb-msg",
  "ssb-query",
+ "ssb-ref",
  "thiserror",
  "tokio",
-]
-
-[[package]]
-name = "ssb-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "serde_with",
- "thiserror",
 ]
 
 [[package]]
@@ -1953,6 +1953,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ssb-msg"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_with",
+ "ssb-ref",
+ "thiserror",
+]
+
+[[package]]
 name = "ssb-multiformats"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1969,9 +1980,10 @@ version = "0.1.0"
 dependencies = [
  "axohtml",
  "serde_json",
- "ssb-core",
  "ssb-markdown",
+ "ssb-msg",
  "ssb-query",
+ "ssb-ref",
 ]
 
 [[package]]
@@ -1987,7 +1999,8 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "sqlx",
- "ssb-core",
+ "ssb-msg",
+ "ssb-ref",
  "thiserror",
  "tokio",
 ]
@@ -1997,8 +2010,13 @@ name = "ssb-ref"
 version = "0.1.0"
 dependencies = [
  "base64 0.21.0",
+ "hashtag-regex",
  "lazy_static",
  "regex",
+ "serde",
+ "serde_with",
+ "thiserror",
+ "urlencoding",
 ]
 
 [[package]]
@@ -2333,6 +2351,12 @@ dependencies = [
  "idna",
  "percent-encoding",
 ]
+
+[[package]]
+name = "urlencoding"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8db7427f936968176eaa7cdf81b7f98b980b18495ec28f1b5791ac3bfe3eea9"
 
 [[package]]
 name = "vcpkg"

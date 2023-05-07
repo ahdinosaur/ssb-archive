@@ -5,182 +5,13 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 use serde_with::{serde_as, DefaultOnError, OneOrMany};
-use std::{convert::TryFrom, fmt, str::FromStr};
-use thiserror::Error as ThisError;
-
-#[derive(Copy, Clone, Debug, ThisError)]
-pub enum KeyError {
-    #[error("{id_type} must start with {sigil}.")]
-    MissingSigil {
-        id_type: &'static str,
-        sigil: &'static str,
-    },
-}
-
-/*
-#[error("Missing {field} field in {contentType} content.")]
-MissingField {
-    contentType: &'static str,
-    field: &'static str,
-},
-*/
-
-/**
- * Starts with @
- */
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(try_from = "String")]
-pub struct FeedKey(pub String);
-
-impl TryFrom<String> for FeedKey {
-    type Error = KeyError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.starts_with('@') {
-            Ok(FeedKey(value))
-        } else {
-            Err(KeyError::MissingSigil {
-                id_type: "FeedKey",
-                sigil: "'@'",
-            })
-        }
-    }
-}
-
-impl From<&FeedKey> for String {
-    fn from(value: &FeedKey) -> String {
-        value.0.clone()
-    }
-}
-
-/**
- * Starts with %
- */
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(try_from = "String")]
-pub struct MsgKey(pub String);
-
-impl TryFrom<String> for MsgKey {
-    type Error = KeyError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.starts_with('%') {
-            Ok(MsgKey(value))
-        } else {
-            Err(KeyError::MissingSigil {
-                id_type: "MsgKey",
-                sigil: "'%'",
-            })
-        }
-    }
-}
-
-impl From<&MsgKey> for String {
-    fn from(value: &MsgKey) -> String {
-        value.0.clone()
-    }
-}
-
-/**
- * Starts with &
- */
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(try_from = "String")]
-pub struct BlobKey(pub String);
-
-impl TryFrom<String> for BlobKey {
-    type Error = KeyError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.starts_with('&') {
-            Ok(BlobKey(value))
-        } else {
-            Err(KeyError::MissingSigil {
-                id_type: "BlobKey",
-                sigil: "'&'",
-            })
-        }
-    }
-}
-
-impl From<&BlobKey> for String {
-    fn from(value: &BlobKey) -> String {
-        value.0.clone()
-    }
-}
-
-/**
- * Starts with #
- */
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(try_from = "String")]
-pub struct HashtagKey(pub String);
-
-impl TryFrom<String> for HashtagKey {
-    type Error = KeyError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.starts_with('#') {
-            Ok(HashtagKey(value))
-        } else {
-            Err(KeyError::MissingSigil {
-                id_type: "HashtagKey",
-                sigil: "'#'",
-            })
-        }
-    }
-}
-
-impl From<&HashtagKey> for String {
-    fn from(value: &HashtagKey) -> String {
-        value.0.clone()
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(try_from = "String")]
-pub enum LinkKey {
-    Feed(FeedKey),
-    Msg(MsgKey),
-    Blob(BlobKey),
-    Hashtag(HashtagKey),
-}
-
-impl TryFrom<String> for LinkKey {
-    type Error = KeyError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.starts_with('@') {
-            Ok(LinkKey::Feed(FeedKey(value)))
-        } else if value.starts_with('%') {
-            Ok(LinkKey::Msg(MsgKey(value)))
-        } else if value.starts_with('&') {
-            Ok(LinkKey::Blob(BlobKey(value)))
-        } else if value.starts_with('#') {
-            Ok(LinkKey::Hashtag(HashtagKey(value)))
-        } else {
-            Err(KeyError::MissingSigil {
-                id_type: "LinkKey",
-                sigil: "either '@', '%', '&', or '#'",
-            })
-        }
-    }
-}
-
-impl From<&LinkKey> for String {
-    fn from(value: &LinkKey) -> String {
-        match value {
-            LinkKey::Feed(id) => id.into(),
-            LinkKey::Msg(id) => id.into(),
-            LinkKey::Blob(id) => id.into(),
-            LinkKey::Hashtag(id) => id.into(),
-        }
-    }
-}
+use ssb_ref::{BlobRef, FeedRef, HashtagRef, LinkRef, MsgRef, RefError};
+use std::{fmt, str::FromStr};
+// use thiserror::Error as ThisError;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Msg<Content> {
-    pub key: MsgKey,
+    pub key: MsgRef,
     pub value: MsgValue<Content>,
     #[serde(alias = "timestamp")]
     pub timestamp_received: f64,
@@ -188,8 +19,8 @@ pub struct Msg<Content> {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MsgValue<Content> {
-    // pub previous: MsgKey,
-    pub author: FeedKey,
+    // pub previous: MsgRef,
+    pub author: FeedRef,
     pub sequence: u64,
     #[serde(alias = "timestamp")]
     pub timestamp_asserted: f64,
@@ -232,27 +63,27 @@ pub enum MsgContent {
 #[serde(untagged)]
 pub enum Link {
     Feed {
-        link: FeedKey,
+        link: FeedRef,
         #[serde_as(deserialize_as = "DefaultOnError")]
         #[serde(default)]
         name: Option<String>,
     },
     Msg {
-        link: MsgKey,
+        link: MsgRef,
         #[serde_as(deserialize_as = "DefaultOnError")]
         #[serde(default)]
         name: Option<String>,
     },
     Blob(BlobLink),
     Hashtag {
-        link: HashtagKey,
+        link: HashtagRef,
     },
 }
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BlobLink {
-    pub link: BlobKey,
+    pub link: BlobRef,
     #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub name: Option<String>,
@@ -281,19 +112,19 @@ pub struct PostContent {
     #[serde_as(as = "Option<DefaultOnError<OneOrMany<_>>>")]
     #[serde(default)]
     pub mentions: Option<Vec<Link>>,
-    pub root: Option<MsgKey>,
+    pub root: Option<MsgRef>,
     #[serde_as(as = "Option<DefaultOnError<OneOrMany<_>>>")]
     #[serde(default)]
-    pub branch: Option<Vec<MsgKey>>,
+    pub branch: Option<Vec<MsgRef>>,
     #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
-    pub fork: Option<MsgKey>,
+    pub fork: Option<MsgRef>,
 }
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ContactContent {
-    pub contact: FeedKey,
+    pub contact: FeedRef,
     #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub following: Option<bool>,
@@ -310,7 +141,9 @@ pub struct VoteContent {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Vote {
-    pub link: MsgKey,
+    pub link: MsgRef,
+    // TODO: parse strings if they are numbers
+    // - yup has a bunch of these messages...
     pub value: i32,
     #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
@@ -320,7 +153,7 @@ pub struct Vote {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AboutContent {
-    pub about: LinkKey,
+    pub about: LinkRef,
     #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub name: Option<String>,
@@ -340,25 +173,25 @@ pub struct BlogContent {
     thumbnail: Option<String>,
     blog: String,
     mentions: Option<Vec<any>>,
-    root: Option<MsgKey>,
-    branch: Option<Vec<MsgKey>>,
-    fork: Option<MsgKey>,
+    root: Option<MsgRef>,
+    branch: Option<Vec<MsgRef>>,
+    fork: Option<MsgRef>,
 }
 
 pub struct AliasContent {
     action: Option<String>,
     alias: Option<String>,
     alias_url: Option<String>,
-    room: Option<FeedKey>,
+    room: Option<FeedRef>,
 }
 
 pub struct GatheringContent {
-    progenitor: Option<MsgKey>,
-    mentions: Option<Vec<FeedKey>>,
+    progenitor: Option<MsgRef>,
+    mentions: Option<Vec<FeedRef>>,
 }
 
 pub struct GatheringUpdateContent {
-    about: MsgKey,
+    about: MsgRef,
     title: Option<String>,
     description: Option<String>,
     location: Option<String>,
@@ -374,12 +207,12 @@ pub struct DateTime {
 }
 
 pub struct AttendeeContent {
-    about: MsgKey,
+    about: MsgRef,
     attendee: Attendee,
 }
 
 pub struct Attendee {
-    link: FeedKey,
+    link: FeedRef,
     remove: Option<bool>,
 }
 */
@@ -388,7 +221,7 @@ pub struct Attendee {
 // https://users.rust-lang.org/t/solved-serde-deserialize-with-for-option-s/12749/2
 
 impl FromStr for BlobLink {
-    type Err = KeyError;
+    type Err = RefError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(BlobLink {
@@ -450,11 +283,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // use super::*;
 
     #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+    fn it_works() {}
 }

@@ -9,33 +9,34 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqliteRow},
     ConnectOptions, Connection, Error as SqlError, Row,
 };
-use ssb_core::{BlobLink, KeyError, Link, Msg, MsgContent, MsgValue};
+use ssb_msg::{BlobLink, Link, Msg, MsgContent, MsgValue};
+use ssb_ref::RefError;
 use std::str::FromStr;
 use thiserror::Error as ThisError;
 
 mod abouts;
-mod blob_keys;
 mod blob_links;
+mod blob_refs;
 mod branches;
 mod contacts;
-mod feed_keys;
 mod feed_links;
+mod feed_refs;
 mod migrations;
-mod msg_keys;
 mod msg_links;
+mod msg_refs;
 mod msgs;
 mod queries;
 mod votes;
 use self::abouts::*;
-use self::blob_keys::*;
 use self::blob_links::*;
+use self::blob_refs::*;
 use self::branches::*;
 use self::contacts::*;
-use self::feed_keys::*;
 use self::feed_links::*;
+use self::feed_refs::*;
 use self::migrations::*;
-use self::msg_keys::*;
 use self::msg_links::*;
+use self::msg_refs::*;
 use self::msgs::*;
 pub use self::queries::SelectAllMsgsByFeedOptions;
 pub(crate) use self::queries::*;
@@ -49,8 +50,8 @@ pub enum SqlViewError {
     Sql(#[from] SqlError),
     #[error("Json error: {0}")]
     Json(#[from] JsonError),
-    #[error("Id format error: {0}")]
-    IdFormat(#[from] KeyError),
+    #[error("Ref format error: {0}")]
+    RefFormat(#[from] RefError),
 }
 
 pub struct SqlView {
@@ -67,11 +68,7 @@ async fn create_connection(path: &str) -> Result<SqliteConnection, SqlError> {
 }
 
 impl SqlView {
-    pub async fn new(
-        path: &str,
-        secret_keys: Vec<Keypair>,
-        pub_key: &str,
-    ) -> Result<SqlView, SqlViewError> {
+    pub async fn new(path: &str, secret_keys: Vec<Keypair>) -> Result<SqlView, SqlViewError> {
         let mut connection = create_connection(path).await?;
 
         if let Ok(false) = is_db_up_to_date(&mut connection).await {
@@ -187,7 +184,7 @@ async fn append_item(
 
     let (is_decrypted, msg) = attempt_decryption(msg, secret_keys);
 
-    let msg_key_id = find_or_create_msg_key(connection, &msg.key).await.unwrap();
+    let msg_ref_id = find_or_create_msg_ref(connection, &msg.key).await?;
 
     if !msg.value.content.is_object() {
         // early return if content is not object
@@ -211,32 +208,32 @@ async fn append_item(
     match content {
         MsgContent::Post(post) => {
             if let Some(links) = post.mentions {
-                let mut msg_keys = Vec::new();
-                let mut feed_keys = Vec::new();
-                let mut blob_keys = Vec::new();
+                let mut msg_refs = Vec::new();
+                let mut feed_refs = Vec::new();
+                let mut blob_refs = Vec::new();
                 let mut hashtag_keys = Vec::new();
                 for link in links.iter() {
                     match link {
-                        Link::Msg { link, .. } => msg_keys.push(link),
-                        Link::Feed { link, .. } => feed_keys.push(link),
-                        Link::Blob(BlobLink { link, .. }) => blob_keys.push(link),
+                        Link::Msg { link, .. } => msg_refs.push(link),
+                        Link::Feed { link, .. } => feed_refs.push(link),
+                        Link::Blob(BlobLink { link, .. }) => blob_refs.push(link),
                         Link::Hashtag { link } => hashtag_keys.push(link),
                     }
                 }
-                insert_links(connection, msg_keys.as_slice(), msg_key_id).await?;
-                insert_feed_links(connection, feed_keys.as_slice(), msg_key_id).await?;
-                insert_blob_links(connection, blob_keys.as_slice(), msg_key_id).await?;
+                insert_links(connection, msg_refs.as_slice(), msg_ref_id).await?;
+                insert_feed_links(connection, feed_refs.as_slice(), msg_ref_id).await?;
+                insert_blob_links(connection, blob_refs.as_slice(), msg_ref_id).await?;
             }
 
             let root_key_id = if let Some(root) = post.root {
                 trace!("get root key id");
-                Some(find_or_create_msg_key(connection, &root).await?)
+                Some(find_or_create_msg_ref(connection, &root).await?)
             } else {
                 None
             };
             let fork_key_id = if let Some(fork) = post.fork {
                 trace!("get fork key id");
-                Some(find_or_create_msg_key(connection, &fork).await?)
+                Some(find_or_create_msg_ref(connection, &fork).await?)
             } else {
                 None
             };
@@ -244,23 +241,23 @@ async fn append_item(
                 connection,
                 &msg,
                 *seq as i64,
-                msg_key_id,
+                msg_ref_id,
                 root_key_id,
                 fork_key_id,
                 is_decrypted,
             )
             .await?;
             if let Some(branch) = post.branch {
-                insert_branches(connection, branch.as_slice(), msg_key_id).await?;
+                insert_branches(connection, branch.as_slice(), msg_ref_id).await?;
             }
         }
         MsgContent::Contact(contact) => {
-            insert_or_update_contacts(connection, &msg, &contact, msg_key_id, is_decrypted).await?;
+            insert_or_update_contacts(connection, &msg, &contact, msg_ref_id, is_decrypted).await?;
             insert_msg(
                 connection,
                 &msg,
                 *seq as i64,
-                msg_key_id,
+                msg_ref_id,
                 None,
                 None,
                 is_decrypted,
@@ -273,7 +270,7 @@ async fn append_item(
                 connection,
                 &msg,
                 *seq as i64,
-                msg_key_id,
+                msg_ref_id,
                 None,
                 None,
                 is_decrypted,
@@ -281,12 +278,12 @@ async fn append_item(
             .await?;
         }
         MsgContent::About(about) => {
-            insert_abouts(connection, &msg, &about, msg_key_id).await?;
+            insert_abouts(connection, &msg, &about, msg_ref_id).await?;
             insert_msg(
                 connection,
                 &msg,
                 *seq as i64,
-                msg_key_id,
+                msg_ref_id,
                 None,
                 None,
                 is_decrypted,
@@ -314,11 +311,11 @@ async fn set_pragmas(connection: &mut SqliteConnection) -> Result<(), SqlError> 
 async fn create_tables(connection: &mut SqliteConnection) -> Result<(), SqlError> {
     create_migrations_tables(connection).await?;
     create_msgs_tables(connection).await?;
-    create_msg_keys_tables(connection).await?;
+    create_msg_refs_tables(connection).await?;
     create_msg_links_tables(connection).await?;
-    create_feed_keys_tables(connection).await?;
+    create_feed_refs_tables(connection).await?;
     create_feed_links_tables(connection).await?;
-    create_blob_keys_tables(connection).await?;
+    create_blob_refs_tables(connection).await?;
     create_blob_links_tables(connection).await?;
     create_contacts_tables(connection).await?;
     create_branches_tables(connection).await?;
@@ -339,9 +336,9 @@ async fn create_views(connection: &mut SqliteConnection) -> Result<(), SqlError>
 
 async fn create_indices(connection: &mut SqliteConnection) -> Result<(), SqlError> {
     create_msgs_indices(connection).await?;
-    create_msg_keys_indices(connection).await?;
+    create_msg_refs_indices(connection).await?;
     create_msg_links_indices(connection).await?;
-    create_feed_keys_indices(connection).await?;
+    create_feed_refs_indices(connection).await?;
     create_feed_links_indices(connection).await?;
     create_blob_links_indices(connection).await?;
     create_contacts_indices(connection).await?;
@@ -394,7 +391,7 @@ mod test {
   "key": "%KKPLj1tWfuVhCvgJz2hG/nIsVzmBRzUJaqHv+sb+n1c=.sha256",
   "value": {
     "previous": "%xsMQA2GrsZew0GSxmDSBaoxDafVaUJ07YVaDGcp65a4=.sha256",
-    "feed_key": "@QlCTpvY7p9ty2yOFrv1WU1AE88aoQc4Y7wYal7PFc+w=.ed25519",
+    "feed_ref": "@QlCTpvY7p9ty2yOFrv1WU1AE88aoQc4Y7wYal7PFc+w=.ed25519",
     "sequence": 4797,
     "timestamp": 1543958997985,
     "hash": "sha256",

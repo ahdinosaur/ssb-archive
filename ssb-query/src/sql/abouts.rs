@@ -1,7 +1,8 @@
 use log::trace;
 use serde_json::Value;
 use sqlx::{query, Error, SqliteConnection};
-use ssb_core::{AboutContent, LinkKey, Msg};
+use ssb_msg::{AboutContent, Msg};
+use ssb_ref::LinkRef;
 
 use crate::sql::*;
 
@@ -11,9 +12,9 @@ pub async fn create_abouts_tables(connection: &mut SqliteConnection) -> Result<(
     query(
         "CREATE TABLE IF NOT EXISTS abouts_raw (
           id INTEGER PRIMARY KEY,
-          link_from_key_id INTEGER,
-          link_to_author_id INTEGER,
-          link_to_key_id INTEGER
+          link_from_msg_ref_id INTEGER,
+          link_to_feed_ref_id INTEGER,
+          link_to_msg_ref_id INTEGER
         )",
     )
     .execute(connection)
@@ -24,26 +25,26 @@ pub async fn create_abouts_tables(connection: &mut SqliteConnection) -> Result<(
 
 pub async fn insert_abouts(
     connection: &mut SqliteConnection,
-    msg: &Msg<Value>,
+    _msg: &Msg<Value>,
     content: &AboutContent,
-    msg_key_id: i64,
+    msg_ref_id: i64,
 ) -> Result<(), Error> {
-    let (link_to_feed_key_id, link_to_msg_key_id) = match &content.about {
-        LinkKey::Feed(feed_key) => {
-            let feed_key_id = find_or_create_feed_key(connection, feed_key).await?;
-            (Some(feed_key_id), None)
+    let (link_to_feed_ref_id, link_to_msg_ref_id) = match &content.about {
+        LinkRef::Feed(feed_ref) => {
+            let feed_ref_id = find_or_create_feed_ref(connection, feed_ref).await?;
+            (Some(feed_ref_id), None)
         }
-        LinkKey::Msg(msg_id) => {
-            let msg_key_id = find_or_create_msg_key(connection, msg_id).await?;
-            (None, Some(msg_key_id))
+        LinkRef::Msg(msg_ref) => {
+            let msg_ref_id = find_or_create_msg_ref(connection, msg_ref).await?;
+            (None, Some(msg_ref_id))
         }
         _ => (None, None),
     };
 
-    query("INSERT INTO abouts_raw (link_from_key_id, link_to_author_id, link_to_key_id) VALUES (?, ?, ?)")
-        .bind(&msg_key_id)
-        .bind(&link_to_feed_key_id)
-        .bind(&link_to_msg_key_id)
+    query("INSERT INTO abouts_raw (link_from_msg_ref_id, link_to_feed_ref_id, link_to_msg_ref_id) VALUES (?, ?, ?)")
+        .bind(&msg_ref_id)
+        .bind(&link_to_feed_ref_id)
+        .bind(&link_to_msg_ref_id)
         .execute(connection)
         .await?;
 
@@ -52,13 +53,17 @@ pub async fn insert_abouts(
 
 pub async fn create_abouts_indices(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating abouts index");
-    query("CREATE INDEX IF NOT EXISTS abouts_raw_from_index on abouts_raw (link_from_key_id)")
-        .execute(&mut *connection)
-        .await?;
-    query("CREATE INDEX IF NOT EXISTS abouts_raw_key_index on abouts_raw (link_to_key_id)")
-        .execute(&mut *connection)
-        .await?;
-    query("CREATE INDEX IF NOT EXISTS abouts_raw_author_index on abouts_raw (link_to_author_id )")
+    query(
+        "CREATE INDEX IF NOT EXISTS abouts_from_msg_ref_id_index on abouts_raw (link_from_msg_ref_id)",
+    )
+    .execute(&mut *connection)
+    .await?;
+    query(
+        "CREATE INDEX IF NOT EXISTS abouts_to_msg_ref_id_index on abouts_raw (link_to_msg_ref_id)",
+    )
+    .execute(&mut *connection)
+    .await?;
+    query("CREATE INDEX IF NOT EXISTS abouts_to_feed_ref_id_index on abouts_raw (link_to_feed_ref_id )")
         .execute(&mut *connection)
         .await?;
     Ok(())
@@ -72,19 +77,19 @@ pub async fn create_abouts_views(connection: &mut SqliteConnection) -> Result<()
         CREATE VIEW IF NOT EXISTS abouts AS
         SELECT 
             abouts_raw.id as id, 
-            abouts_raw.link_from_key_id as link_from_key_id, 
-            abouts_raw.link_to_key_id as link_to_key_id, 
-            abouts_raw.link_to_author_id as link_to_author_id, 
-            keys_from.key as link_from_key, 
-            keys_to.key as link_to_key, 
-            authors_to.author as link_to_author,
+            abouts_raw.link_from_msg_ref_id as link_from_msg_ref_id, 
+            abouts_raw.link_to_msg_ref_id as link_to_msg_ref_id, 
+            abouts_raw.link_to_feed_ref_id as link_to_feed_ref_id, 
+            msg_refs_from.msg_ref as link_from_msg_ref, 
+            msg_refs_to.msg_ref as link_to_msg_ref, 
+            feed_refs_to.feed_ref as link_to_feed_ref,
             msgs.content as content,
-            msgs.author as link_from_author
+            msgs.feed_ref as link_from_feed_ref
         FROM abouts_raw 
-        JOIN keys AS keys_from ON keys_from.id=abouts_raw.link_from_key_id
-        JOIN msgs ON link_from_key_id=msgs.key_id
-        LEFT JOIN keys AS keys_to ON keys_to.id=abouts_raw.link_to_key_id
-        LEFT JOIN authors AS authors_to ON authors_to.id=abouts_raw.link_to_author_id
+        JOIN msg_refs AS msg_refs_from ON msg_refs_from.id = abouts_raw.link_from_msg_ref_id
+        JOIN msgs ON link_from_msg_ref_id = msgs.msg_ref_id
+        LEFT JOIN msg_refs AS msg_refs_to ON msg_refs_to.id = abouts_raw.link_to_msg_ref_id
+        LEFT JOIN feed_refs AS feed_refs_to ON feed_refs_to.id=abouts_raw.link_to_feed_ref_id
         ",
     )
     .execute(connection)
