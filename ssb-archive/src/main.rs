@@ -1,11 +1,29 @@
-use std::{error::Error, thread::sleep, time::Duration};
+// use std::{thread::sleep, time::Duration};
 
-use ssb_core::FeedId;
+use ssb_core::{FeedId, IdError};
 use ssb_markdown::render;
-use ssb_query::{SelectAllMessagesByFeedOptions, SsbQuery};
+use ssb_query::{sql::SqlViewError, SelectAllMessagesByFeedOptions, SsbQuery};
+use thiserror::Error as ThisError;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() {
+    match exec().await {
+        Ok(()) => {}
+        Err(err) => {
+            eprintln!("{}", err);
+        }
+    }
+}
+
+#[derive(Debug, ThisError)]
+enum Error {
+    #[error("Query error: {0}")]
+    Query(#[from] SqlViewError),
+    #[error("Id format error: {0}")]
+    IdFormat(#[from] IdError),
+}
+
+async fn exec() -> Result<(), Error> {
     let mut view = SsbQuery::new(
         "/home/dinosaur/.ssb/flume/log.offset".into(),
         "/home/dinosaur/repos/ahdinosaur/ssb-archive/output.sqlite3".into(),
@@ -17,7 +35,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     while view.get_log_latest().await != view.get_view_latest().await {
         println!("log latest: {:?}", view.get_log_latest().await);
         println!("view latest: {:?}", view.get_view_latest().await);
-        view.process(1000).await?;
+        view.process(10000).await?;
         // sleep(Duration::from_secs(1))
     }
 

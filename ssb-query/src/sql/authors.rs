@@ -30,7 +30,7 @@ pub async fn create_authors_tables(connection: &mut SqliteConnection) -> Result<
     query(
         "CREATE TABLE IF NOT EXISTS authors (
           id INTEGER PRIMARY KEY,
-          author TEXT UNIQUE,
+          author TEXT UNIQUE
         )",
     )
     .execute(connection)

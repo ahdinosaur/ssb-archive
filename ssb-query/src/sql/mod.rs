@@ -6,10 +6,11 @@ use serde_derive::{Deserialize, Serialize};
 use serde_json::{from_value, Error as JsonError, Value};
 use sqlx::{
     query,
-    sqlite::{SqliteConnection, SqliteRow},
-    Connection, Error as SqlError, Row,
+    sqlite::{SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqliteRow},
+    ConnectOptions, Connection, Error as SqlError, Row,
 };
 use ssb_core::{BlobLink, IdError, Link};
+use std::str::FromStr;
 use thiserror::Error as ThisError;
 
 pub use ssb_core::{Msg, MsgContent, MsgValue};
@@ -46,11 +47,11 @@ use self::votes::*;
 pub enum SqlViewError {
     #[error("Db failed integrity check")]
     DbFailedIntegrityCheck {},
-    #[error("Sql error")]
+    #[error("Sql error: {0}")]
     Sql(#[from] SqlError),
-    #[error("Json error")]
+    #[error("Json error: {0}")]
     Json(#[from] JsonError),
-    #[error("Id format error")]
+    #[error("Id format error: {0}")]
     IdFormat(#[from] IdError),
 }
 
@@ -60,7 +61,11 @@ pub struct SqlView {
 }
 
 async fn create_connection(path: &str) -> Result<SqliteConnection, SqlError> {
-    SqliteConnection::connect(path).await
+    SqliteConnectOptions::from_str(path)?
+        .journal_mode(SqliteJournalMode::Wal)
+        .create_if_missing(true)
+        .connect()
+        .await
 }
 
 impl SqlView {
@@ -148,30 +153,6 @@ impl SqlView {
     }
 }
 
-fn find_values_in_object_by_key<'a>(obj: &'a Value, key: &str, values: &mut Vec<&'a Value>) {
-    if let Some(val) = obj.get(key) {
-        values.push(val)
-    }
-
-    match obj {
-        Value::Array(arr) => {
-            for val in arr {
-                find_values_in_object_by_key(val, key, values);
-            }
-        }
-        Value::Object(kv) => {
-            for val in kv.values() {
-                match val {
-                    Value::Object(_) => find_values_in_object_by_key(val, key, values),
-                    Value::Array(_) => find_values_in_object_by_key(val, key, values),
-                    _ => (),
-                }
-            }
-        }
-        _ => (),
-    }
-}
-
 fn attempt_decryption(mut message: Msg<Value>, secret_keys: &[Keypair]) -> (bool, Msg<Value>) {
     let mut is_decrypted = false;
 
@@ -209,10 +190,21 @@ async fn append_item(
 
     if !msg.value.content.is_object() {
         // early return if content is not object
+        // eprintln!("No content: {:?}", msg.value.content);
         return Ok(());
     }
 
-    let content: MsgContent = from_value(msg.value.content.clone())?;
+    let content_result: Result<MsgContent, JsonError> = from_value(msg.value.content.clone());
+
+    let content = match content_result {
+        Ok(content) => content,
+        Err(error) => {
+            // early return if content is misformatted
+            // eprintln!("Error: {}", error);
+            // eprintln!("-> Content: {:?}", msg.value.content);
+            return Ok(());
+        }
+    };
 
     match content {
         MsgContent::Post(post) => {

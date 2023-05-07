@@ -1910,6 +1910,7 @@ dependencies = [
  "ssb-core",
  "ssb-markdown",
  "ssb-query",
+ "thiserror",
  "tokio",
 ]
 
