@@ -68,11 +68,7 @@ async fn create_connection(path: &str) -> Result<SqliteConnection, SqlError> {
 }
 
 impl SqlView {
-    pub async fn new(
-        path: &str,
-        secret_keys: Vec<Keypair>,
-        pub_key: &str,
-    ) -> Result<SqlView, SqlViewError> {
+    pub async fn new(path: &str, secret_keys: Vec<Keypair>) -> Result<SqlView, SqlViewError> {
         let mut connection = create_connection(path).await?;
 
         if let Ok(false) = is_db_up_to_date(&mut connection).await {

@@ -25,7 +25,7 @@ pub async fn create_abouts_tables(connection: &mut SqliteConnection) -> Result<(
 
 pub async fn insert_abouts(
     connection: &mut SqliteConnection,
-    msg: &Msg<Value>,
+    _msg: &Msg<Value>,
     content: &AboutContent,
     msg_ref_id: i64,
 ) -> Result<(), Error> {

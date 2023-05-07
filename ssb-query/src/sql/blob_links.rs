@@ -61,8 +61,8 @@ pub async fn insert_blob_links(
 }
 
 pub async fn create_blob_links_indices(connection: &mut SqliteConnection) -> Result<(), Error> {
-    create_blob_links_to_index(&mut *connection).await;
-    create_blob_links_from_index(&mut *connection).await;
+    create_blob_links_to_index(&mut *connection).await?;
+    create_blob_links_from_index(&mut *connection).await?;
 
     Ok(())
 }

@@ -39,6 +39,6 @@ pub async fn create_feed_refs_tables(connection: &mut SqliteConnection) -> Resul
     Ok(())
 }
 
-pub async fn create_feed_refs_indices(connection: &mut SqliteConnection) -> Result<(), Error> {
+pub async fn create_feed_refs_indices(_connection: &mut SqliteConnection) -> Result<(), Error> {
     Ok(())
 }

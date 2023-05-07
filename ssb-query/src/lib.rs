@@ -24,7 +24,6 @@ impl SsbQuery {
         log_path: String,
         view_path: String,
         keys: Vec<Keypair>,
-        pub_key: &str,
     ) -> Result<SsbQuery, SqlViewError> {
         let log_file = OpenOptions::new()
             .read(true)
@@ -33,7 +32,7 @@ impl SsbQuery {
             .open(&log_path)
             .unwrap();
         let log = OffsetLog::<u32>::from_file(log_file).unwrap();
-        let view = SqlView::new(&view_path, keys, pub_key).await?;
+        let view = SqlView::new(&view_path, keys).await?;
 
         Ok(SsbQuery { view, log })
     }

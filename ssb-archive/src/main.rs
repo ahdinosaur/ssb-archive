@@ -28,7 +28,6 @@ async fn exec() -> Result<(), Error> {
         "/home/dinosaur/.ssb/flume/log.offset".into(),
         "/home/dinosaur/repos/ahdinosaur/ssb-archive/output.sqlite3".into(),
         Vec::new(),
-        &"6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519",
     )
     .await?;
 
