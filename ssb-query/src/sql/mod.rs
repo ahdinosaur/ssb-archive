@@ -200,8 +200,9 @@ async fn append_item(
         Ok(content) => content,
         Err(error) => {
             // early return if content is misformatted
-            // eprintln!("Error: {}", error);
-            // eprintln!("-> Content: {:?}", msg.value.content);
+            eprintln!("Error: {}", error);
+            eprintln!("-> Content: {:?}", msg.value.content);
+            // return Err(error.into());
             return Ok(());
         }
     };

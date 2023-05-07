@@ -5,7 +5,7 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 use serde_json::Value;
-use serde_with::serde_as;
+use serde_with::{serde_as, DefaultOnError, OneOrMany};
 use std::{convert::TryFrom, fmt, str::FromStr};
 use thiserror::Error as ThisError;
 
@@ -228,23 +228,47 @@ pub enum MsgContent {
     Unknown,
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum Link {
-    Feed { link: FeedId, name: Option<String> },
-    Msg { link: MsgId, name: Option<String> },
+    Feed {
+        link: FeedId,
+        #[serde_as(deserialize_as = "DefaultOnError")]
+        #[serde(default)]
+        name: Option<String>,
+    },
+    Msg {
+        link: MsgId,
+        #[serde_as(deserialize_as = "DefaultOnError")]
+        #[serde(default)]
+        name: Option<String>,
+    },
     Blob(BlobLink),
-    Hashtag { link: HashtagId },
+    Hashtag {
+        link: HashtagId,
+    },
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BlobLink {
     pub link: BlobId,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
     pub name: Option<String>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
     pub width: Option<u64>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
     pub height: Option<u64>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
     pub size: Option<u64>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(alias = "type")]
+    #[serde(default)]
     pub mime_type: Option<String>,
 }
 
@@ -252,19 +276,30 @@ pub struct BlobLink {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PostContent {
     pub text: String,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
     pub channel: Option<String>,
-    #[serde_as(as = "Option<serde_with::OneOrMany<_>>")]
+    #[serde_as(as = "Option<DefaultOnError<OneOrMany<_>>>")]
+    #[serde(default)]
     pub mentions: Option<Vec<Link>>,
     pub root: Option<MsgId>,
-    #[serde_as(as = "Option<serde_with::OneOrMany<_>>")]
+    #[serde_as(as = "Option<DefaultOnError<OneOrMany<_>>>")]
+    #[serde(default)]
     pub branch: Option<Vec<MsgId>>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
     pub fork: Option<MsgId>,
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ContactContent {
-    pub contact: Option<FeedId>,
+    pub contact: FeedId,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
     pub following: Option<bool>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
     pub blocking: Option<bool>,
 }
 
@@ -273,17 +308,25 @@ pub struct VoteContent {
     pub vote: Vote,
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Vote {
     pub link: MsgId,
     pub value: i32,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
     pub expression: Option<String>,
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AboutContent {
     pub about: LinkId,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
     pub name: Option<String>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
     #[serde(deserialize_with = "deserialize_optional_blob_link")]

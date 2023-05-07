@@ -33,8 +33,8 @@ async fn exec() -> Result<(), Error> {
     .await?;
 
     while view.get_log_latest().await != view.get_view_latest().await {
-        println!("log latest: {:?}", view.get_log_latest().await);
-        println!("view latest: {:?}", view.get_view_latest().await);
+        // println!("log latest: {:?}", view.get_log_latest().await);
+        // println!("view latest: {:?}", view.get_view_latest().await);
         view.process(10000).await?;
         // sleep(Duration::from_secs(1))
     }
