@@ -1,4 +1,5 @@
 use log::trace;
+use serde_json::Value;
 use sqlx::{query, Error, SqliteConnection};
 use ssb_core::{AboutContent, LinkId, Msg};
 
@@ -23,7 +24,7 @@ pub async fn create_abouts_tables(connection: &mut SqliteConnection) -> Result<(
 
 pub async fn insert_abouts(
     connection: &mut SqliteConnection,
-    msg: &Msg,
+    msg: &Msg<Value>,
     content: &AboutContent,
     message_key_id: i64,
 ) -> Result<(), Error> {

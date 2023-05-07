@@ -6,10 +6,12 @@ use itertools::Itertools;
 use private_box::Keypair;
 
 pub mod sql;
+use serde_json::Value;
 pub use sql::SelectAllMessagesByFeedOptions;
 use sql::SqlViewError;
 use sql::{select_all_messages_by_feed, select_max_seq_by_feed};
-pub use sql::{SqlView, Msg, MsgValue};
+pub use sql::{Msg, MsgValue, SqlView};
+use ssb_core::FeedId;
 
 pub struct SsbQuery {
     view: SqlView,
@@ -74,11 +76,11 @@ impl SsbQuery {
     pub async fn select_all_messages_by_feed(
         &mut self,
         options: SelectAllMessagesByFeedOptions<'_>,
-    ) -> Result<Vec<Msg>, SqlViewError> {
+    ) -> Result<Vec<Msg<Value>>, SqlViewError> {
         Ok(select_all_messages_by_feed(&mut self.view.connection, options).await?)
     }
 
-    pub async fn select_max_seq_by_feed(&mut self, feed_id: &str) -> Result<i64, SqlViewError> {
+    pub async fn select_max_seq_by_feed(&mut self, feed_id: &FeedId) -> Result<i64, SqlViewError> {
         Ok(select_max_seq_by_feed(&mut self.view.connection, feed_id).await?)
     }
 }

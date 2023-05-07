@@ -1,5 +1,6 @@
-use std::error::Error;
+use std::{error::Error, thread::sleep, time::Duration};
 
+use ssb_core::FeedId;
 use ssb_markdown::render;
 use ssb_query::{SelectAllMessagesByFeedOptions, SsbQuery};
 
@@ -16,15 +17,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     while view.get_log_latest().await != view.get_view_latest().await {
         println!("log latest: {:?}", view.get_log_latest().await);
         println!("view latest: {:?}", view.get_view_latest().await);
-        view.process(10000).await;
+        view.process(1).await?;
+        sleep(Duration::from_secs(1))
     }
 
-    let feed_id = "@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519";
-    let max_seq = view.select_max_seq_by_feed(feed_id).await.unwrap();
+    let feed_id: FeedId = "@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519"
+        .to_owned()
+        .try_into()?;
+    let max_seq = view.select_max_seq_by_feed(&feed_id).await.unwrap();
 
     let messages = view
         .select_all_messages_by_feed(SelectAllMessagesByFeedOptions {
-            feed_id,
+            feed_id: &feed_id,
             content_type: "post",
             page_size: 10,
             less_than_seq: max_seq + 1,

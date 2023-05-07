@@ -1906,6 +1906,8 @@ dependencies = [
 name = "ssb-archive"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
+ "ssb-core",
  "ssb-markdown",
  "ssb-query",
  "tokio",
@@ -1965,6 +1967,7 @@ name = "ssb-pages"
 version = "0.1.0"
 dependencies = [
  "axohtml",
+ "serde_json",
  "ssb-core",
  "ssb-markdown",
  "ssb-query",

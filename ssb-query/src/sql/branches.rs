@@ -6,7 +6,7 @@ use crate::sql::*;
 
 pub async fn insert_branches(
     connection: &mut SqliteConnection,
-    branches: &[&MsgId],
+    branches: &[MsgId],
     message_key_id: i64,
 ) -> Result<(), Error> {
     for branch in branches.iter() {

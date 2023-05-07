@@ -1,10 +1,11 @@
 use crate::sql::*;
-use crate::Msg;
+use serde_json::Value;
 use sqlx::{query, Error, Row, SqliteConnection};
+use ssb_core::{FeedId, Msg, MsgId};
 
 pub async fn select_max_seq_by_feed<'a>(
     connection: &mut SqliteConnection,
-    feed_id: &'a str,
+    feed_id: &FeedId,
 ) -> Result<i64, Error> {
     let max_seq: i64 = query(
         "
@@ -17,7 +18,7 @@ pub async fn select_max_seq_by_feed<'a>(
         LIMIT 1
         ",
     )
-    .bind(feed_id)
+    .bind(Into::<String>::into(feed_id))
     .fetch_one(connection)
     .await?
     .get(0);
@@ -26,7 +27,7 @@ pub async fn select_max_seq_by_feed<'a>(
 }
 
 pub struct SelectAllMessagesByFeedOptions<'a> {
-    pub feed_id: &'a str,
+    pub feed_id: &'a FeedId,
     pub content_type: &'a str,
     pub page_size: i64,
     pub less_than_seq: i64,
@@ -36,7 +37,7 @@ pub struct SelectAllMessagesByFeedOptions<'a> {
 pub async fn select_all_messages_by_feed<'a>(
     connection: &mut SqliteConnection,
     options: SelectAllMessagesByFeedOptions<'a>,
-) -> Result<Vec<Msg>, Error> {
+) -> Result<Vec<Msg<Value>>, Error> {
     let rows = query(
         "
         SELECT
@@ -59,7 +60,7 @@ pub async fn select_all_messages_by_feed<'a>(
         LIMIT ?
         ",
     )
-    .bind(options.feed_id)
+    .bind(Into::<String>::into(options.feed_id))
     .bind(options.content_type)
     .bind(options.less_than_seq)
     .bind(options.is_decrypted)
@@ -71,17 +72,17 @@ pub async fn select_all_messages_by_feed<'a>(
         .into_iter()
         .map(|row| {
             Ok(Msg {
-                key: row.get(1),
+                key: MsgId(row.get(1)),
                 value: MsgValue {
-                    author: row.get(2),
-                    sequence: row.get(0),
-                    timestamp: row.get(4),
+                    author: FeedId(row.get(2)),
+                    sequence: row.get::<i64, _>(0) as u64,
+                    timestamp_asserted: row.get(4),
                     content: row.get(5),
                 },
-                timestamp: row.get(3),
+                timestamp_received: row.get(3),
             })
         })
-        .collect::<Result<Vec<Msg>, Error>>()?;
+        .collect::<Result<Vec<Msg<Value>>, Error>>()?;
 
     Ok(messages)
 }
@@ -127,7 +128,7 @@ pub enum Link {
 
 pub async fn select_out_links_by_message(
     connection: &mut SqliteConnection,
-    id: &str,
+    msg_key: &MsgId,
 ) -> Result<Vec<Link>, Error> {
     /*
         SELECT
@@ -142,6 +143,7 @@ pub async fn select_out_links_by_message(
         AND NOT content_type = 'vote'
         AND NOT content_type = 'tag'
     */
+    let msg_key_string: String = msg_key.into();
     let rows = query(
         "
         SELECT
@@ -158,8 +160,8 @@ pub async fn select_out_links_by_message(
         AND content_type = ?3
 ",
     )
-    .bind(id)
-    .bind(id)
+    .bind(&msg_key_string)
+    .bind(&msg_key_string)
     .bind("post")
     .fetch_all(connection)
     .await?;

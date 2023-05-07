@@ -1,4 +1,5 @@
 use log::trace;
+use serde_json::Value;
 use sqlx::{query, Error, SqliteConnection};
 use ssb_core::VoteContent;
 
@@ -22,7 +23,7 @@ pub async fn create_votes_tables(connection: &mut SqliteConnection) -> Result<()
 
 pub async fn insert_or_update_votes(
     connection: &mut SqliteConnection,
-    msg: &Msg,
+    msg: &Msg<Value>,
     content: &VoteContent,
 ) -> Result<(), Error> {
     let author_id = find_or_create_author(connection, &msg.value.author).await?;

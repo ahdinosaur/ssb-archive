@@ -7,29 +7,13 @@ use crate::sql::*;
 
 pub async fn insert_message(
     connection: &mut SqliteConnection,
-    message: &Msg,
+    message: &Msg<Value>,
     seq: i64,
     message_key_id: i64,
+    root_key_id: Option<i64>,
+    fork_key_id: Option<i64>,
     is_decrypted: bool,
 ) -> Result<(), Error> {
-    trace!("get root key id");
-    let root_key_id = match message.value.content["root"] {
-        Value::String(ref key) => {
-            let id = find_or_create_key(connection, key).await?;
-            Some(id)
-        }
-        _ => None,
-    };
-
-    trace!("get fork key id");
-    let fork_key_id = match message.value.content["fork"] {
-        Value::String(ref key) => {
-            let id = find_or_create_key(connection, key).await?;
-            Some(id)
-        }
-        _ => None,
-    };
-
     trace!("find or create author");
     let author_id = find_or_create_author(connection, &message.value.author).await?;
 
@@ -37,9 +21,9 @@ pub async fn insert_message(
     query("INSERT INTO messages_raw (flume_seq, key_id, seq, received_time, asserted_time, root_id, fork_id, author_id, content_type, content, is_decrypted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(seq)
         .bind(message_key_id)
-        .bind(message.value.sequence)
-        .bind(message.timestamp)
-        .bind(message.value.timestamp)
+        .bind(message.value.sequence as i64)
+        .bind(message.timestamp_received)
+        .bind(message.value.timestamp_asserted)
         .bind(root_key_id)
         .bind(fork_key_id)
         .bind(author_id)

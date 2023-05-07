@@ -1,4 +1,5 @@
 use log::trace;
+use serde_json::Value;
 use sqlx::{query, Error, SqliteConnection};
 use ssb_core::{ContactContent, Msg};
 
@@ -24,7 +25,7 @@ pub async fn create_contacts_tables(connection: &mut SqliteConnection) -> Result
 
 pub async fn insert_or_update_contacts(
     connection: &mut SqliteConnection,
-    msg: &Msg,
+    msg: &Msg<Value>,
     content: &ContactContent,
     _message_key_id: i64,
     is_decrypted: bool,

@@ -6,12 +6,7 @@ use serde::{
 };
 use serde_json::Value;
 use serde_with::serde_as;
-use std::{
-    convert::{Infallible, TryFrom},
-    fmt::{self, Display},
-    marker::PhantomData,
-    str::FromStr,
-};
+use std::{convert::TryFrom, fmt, str::FromStr};
 use thiserror::Error as ThisError;
 
 #[derive(Copy, Clone, Debug, ThisError)]
@@ -185,25 +180,27 @@ impl From<&LinkId> for String {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Msg {
+pub struct Msg<Content> {
     pub key: MsgId,
-    pub value: MsgValue,
-    pub timestamp_received: i64,
+    pub value: MsgValue<Content>,
+    #[serde(alias = "timestamp")]
+    pub timestamp_received: f64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct MsgValue {
-    pub previous: MsgId,
+pub struct MsgValue<Content> {
+    // pub previous: MsgId,
     pub author: FeedId,
     pub sequence: u64,
-    pub timestamp_asserted: i64,
-    #[serde(default = "MsgValue::default_hash")]
-    pub hash: String,
-    pub content: MsgContent,
-    pub signature: String,
+    #[serde(alias = "timestamp")]
+    pub timestamp_asserted: f64,
+    // #[serde(default = "MsgValue::<Content>::default_hash")]
+    // pub hash: String,
+    pub content: Content,
+    // pub signature: String,
 }
 
-impl MsgValue {
+impl<Content> MsgValue<Content> {
     pub fn default_hash() -> String {
         "sha256".to_string()
     }
@@ -232,22 +229,37 @@ pub enum MsgContentTyped {
     */
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum Link {
+    Feed { link: FeedId, name: Option<String> },
+    Msg { link: MsgId, name: Option<String> },
+    Blob(BlobLink),
+    Hashtag { link: HashtagId },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BlobLink {
+    pub link: BlobId,
+    pub name: Option<String>,
+    pub width: Option<u64>,
+    pub height: Option<u64>,
+    pub size: Option<u64>,
+    #[serde(alias = "type")]
+    pub mime_type: Option<String>,
+}
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PostContent {
     pub text: String,
     pub channel: Option<String>,
-    pub mentions: Vec<Mention>,
+    #[serde_as(as = "serde_with::OneOrMany<_>")]
+    pub mentions: Vec<Link>,
     pub root: Option<MsgId>,
     #[serde_as(as = "serde_with::OneOrMany<_>")]
     pub branch: Vec<MsgId>,
     pub fork: Option<MsgId>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Mention {
-    pub link: LinkId,
-    pub name: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -274,29 +286,8 @@ pub struct AboutContent {
     pub about: LinkId,
     pub name: Option<String>,
     pub description: Option<String>,
-    #[serde(deserialize_with = "deserialize_optional_image")]
-    pub image: Option<Image>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Image {
-    pub link: BlobId,
-    pub name: Option<String>,
-    pub size: Option<u64>,
-    pub image_type: Option<String>,
-}
-
-impl FromStr for Image {
-    type Err = IdError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Image {
-            link: s.to_string().try_into()?,
-            name: None,
-            size: None,
-            image_type: None,
-        })
-    }
+    #[serde(deserialize_with = "deserialize_optional_blob_link")]
+    pub image: Option<BlobLink>,
 }
 
 /*
@@ -330,7 +321,7 @@ pub struct GatheringUpdateContent {
     description: Option<String>,
     location: Option<String>,
     start_date_time: Option<DateTime>,
-    image: Option<Image>,
+    image: Option<BlobLink>,
 }
 
 pub struct DateTime {
@@ -354,31 +345,49 @@ pub struct Attendee {
 // https://serde.rs/string-or-struct.html
 // https://users.rust-lang.org/t/solved-serde-deserialize-with-for-option-s/12749/2
 
-#[derive(Debug, Deserialize)]
-struct WrappedImage(#[serde(deserialize_with = "deserialize_image")] Image);
+impl FromStr for BlobLink {
+    type Err = IdError;
 
-fn deserialize_optional_image<'de, D>(deserializer: D) -> Result<Option<Image>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Option::<WrappedImage>::deserialize(deserializer)
-        .map(|opt_wrapped: Option<WrappedImage>| opt_wrapped.map(|wrapped: WrappedImage| wrapped.0))
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(BlobLink {
+            link: s.to_string().try_into()?,
+            name: None,
+            width: None,
+            height: None,
+            size: None,
+            mime_type: None,
+        })
+    }
 }
 
-fn deserialize_image<'de, D>(deserializer: D) -> Result<Image, D::Error>
+#[derive(Debug, Deserialize)]
+struct WrappedBlobLink(#[serde(deserialize_with = "deserialize_blob_link")] BlobLink);
+
+fn deserialize_optional_blob_link<'de, D>(deserializer: D) -> Result<Option<BlobLink>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    struct DeserializeImage;
+    Option::<WrappedBlobLink>::deserialize(deserializer).map(
+        |opt_wrapped: Option<WrappedBlobLink>| {
+            opt_wrapped.map(|wrapped: WrappedBlobLink| wrapped.0)
+        },
+    )
+}
 
-    impl<'de> Visitor<'de> for DeserializeImage {
-        type Value = Image;
+fn deserialize_blob_link<'de, D>(deserializer: D) -> Result<BlobLink, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct DeserializeBlobLink;
+
+    impl<'de> Visitor<'de> for DeserializeBlobLink {
+        type Value = BlobLink;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter.write_str("string or map")
         }
 
-        fn visit_str<E>(self, value: &str) -> Result<Image, E>
+        fn visit_str<E>(self, value: &str) -> Result<BlobLink, E>
         where
             E: de::Error,
         {
@@ -386,7 +395,7 @@ where
             Ok(image)
         }
 
-        fn visit_map<M>(self, map: M) -> Result<Image, M::Error>
+        fn visit_map<M>(self, map: M) -> Result<BlobLink, M::Error>
         where
             M: MapAccess<'de>,
         {
@@ -394,7 +403,7 @@ where
         }
     }
 
-    deserializer.deserialize_any(DeserializeImage)
+    deserializer.deserialize_any(DeserializeBlobLink)
 }
 
 #[cfg(test)]
