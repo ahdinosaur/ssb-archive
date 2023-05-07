@@ -1,24 +1,16 @@
 use axohtml::{dom::DOMTree, html, unsafe_text};
+use serde_json::Value;
+use ssb_core::{Msg, PostContent};
 use ssb_markdown::render;
-use ssb_query::SsbMessage;
 
-pub enum PageError {
-    BadContent,
-}
+pub enum PageError {}
 
-pub fn render_post(message: SsbMessage) -> Result<DOMTree<String>, PageError> {
-    let value = message.value;
-    let content = value.content;
-    let content_type = content["type"].as_str().ok_or(PageError::BadContent)?;
-    assert_eq!(content_type, "post");
-    let content_text = content["text"].as_str().ok_or(PageError::BadContent)?;
-    let content_root = content["root"].as_str().ok_or(PageError::BadContent)?;
-    let content_fork = content["fork"].as_str().ok_or(PageError::BadContent)?;
-
-    let content_html = render(content_text);
+pub fn render_post(msg: Msg<Value>, content: PostContent) -> Result<DOMTree<String>, PageError> {
+    let msg_key = Into::<String>::into(&msg.key);
+    let content_html = render(content.text.as_str());
 
     let post_html = html!(
-        <div id=message.key.as_str() class=content_type>
+        <div id=msg_key.as_str() class="post">
             <header>
             </header>
             <article class="content">

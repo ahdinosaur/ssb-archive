@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+ssb-core = { path = "../ssb-core" }
 ssb-query = { path = "../ssb-query" }
 ssb-markdown = { path = "../ssb-markdown" }
 axohtml = "0.5.0"
+serde_json = "1.0.96"

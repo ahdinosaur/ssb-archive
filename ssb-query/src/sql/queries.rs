@@ -1,23 +1,24 @@
 use crate::sql::*;
-use crate::SsbMessage;
+use serde_json::Value;
 use sqlx::{query, Error, Row, SqliteConnection};
+use ssb_core::{FeedKey, Msg, MsgKey};
 
 pub async fn select_max_seq_by_feed<'a>(
     connection: &mut SqliteConnection,
-    feed_id: &'a str,
+    feed_key: &FeedKey,
 ) -> Result<i64, Error> {
     let max_seq: i64 = query(
         "
         SELECT
           MAX(seq)
-        FROM messages_raw
-        JOIN authors ON authors.id = messages_raw.author_id
+        FROM msgs_raw
+        JOIN feed_keys ON feed_keys.id = msgs_raw.feed_key_id
         WHERE
-            authors.author = ?
+            feed_keys.feed_key = ?
         LIMIT 1
         ",
     )
-    .bind(feed_id)
+    .bind(Into::<String>::into(feed_key))
     .fetch_one(connection)
     .await?
     .get(0);
@@ -25,33 +26,33 @@ pub async fn select_max_seq_by_feed<'a>(
     Ok(max_seq)
 }
 
-pub struct SelectAllMessagesByFeedOptions<'a> {
-    pub feed_id: &'a str,
+pub struct SelectAllMsgsByFeedOptions<'a> {
+    pub feed_key: &'a FeedKey,
     pub content_type: &'a str,
     pub page_size: i64,
     pub less_than_seq: i64,
     pub is_decrypted: bool,
 }
 
-pub async fn select_all_messages_by_feed<'a>(
+pub async fn select_all_msgs_by_feed<'a>(
     connection: &mut SqliteConnection,
-    options: SelectAllMessagesByFeedOptions<'a>,
-) -> Result<Vec<SsbMessage>, Error> {
+    options: SelectAllMsgsByFeedOptions<'a>,
+) -> Result<Vec<Msg<Value>>, Error> {
     let rows = query(
         "
         SELECT
             seq,
-            keys.key as key,
-            authors.author as author,
+            msg_keys.key as key,
+            feed_keys.feed_key as feed_key,
             received_time,
             asserted_time,
             content,
             is_decrypted
-        FROM messages_raw
-        JOIN keys ON keys.id = messages_raw.key_id
-        JOIN authors ON authors.id = messages_raw.author_id
+        FROM msgs_raw
+        JOIN keys ON keys.id = msgs_raw.key_id
+        JOIN feed_keys ON feed_keys.id = msgs_raw.feed_key_id
         WHERE
-            authors.author = ?
+            feed_keys.feed_key = ?
             AND content_type = ?
             AND seq < ?
             AND is_decrypted = ?
@@ -59,7 +60,7 @@ pub async fn select_all_messages_by_feed<'a>(
         LIMIT ?
         ",
     )
-    .bind(options.feed_id)
+    .bind(Into::<String>::into(options.feed_key))
     .bind(options.content_type)
     .bind(options.less_than_seq)
     .bind(options.is_decrypted)
@@ -67,23 +68,23 @@ pub async fn select_all_messages_by_feed<'a>(
     .fetch_all(connection)
     .await?;
 
-    let messages = rows
+    let msgs = rows
         .into_iter()
         .map(|row| {
-            Ok(SsbMessage {
-                key: row.get(1),
-                value: SsbValue {
-                    author: row.get(2),
-                    sequence: row.get(0),
-                    timestamp: row.get(4),
+            Ok(Msg {
+                key: MsgKey(row.get(1)),
+                value: MsgValue {
+                    author: FeedKey(row.get(2)),
+                    sequence: row.get::<i64, _>(0) as u64,
+                    timestamp_asserted: row.get(4),
                     content: row.get(5),
                 },
-                timestamp: row.get(3),
+                timestamp_received: row.get(3),
             })
         })
-        .collect::<Result<Vec<SsbMessage>, Error>>()?;
+        .collect::<Result<Vec<Msg<Value>>, Error>>()?;
 
-    Ok(messages)
+    Ok(msgs)
 }
 // select all posts by a user
 //   - greater than seq
@@ -92,20 +93,20 @@ pub async fn select_all_messages_by_feed<'a>(
 SELECT
   seq,
   keys.key as key,
-  authors.author as author,
+  feed_keys.feed_key as feed_key,
   asserted_time,
   content_type,
   content,
   is_decrypted,
   root_keys.key as root,
   fork_keys.key as fork
-FROM messages_raw
-JOIN keys ON keys.id=messages_raw.key_id
-LEFT JOIN keys AS root_keys ON root_keys.id=messages_raw.root_id
-LEFT JOIN keys AS fork_keys ON fork_keys.id=messages_raw.fork_id
-JOIN authors ON authors.id=messages_raw.author_id
+FROM msgs_raw
+JOIN keys ON keys.id=msgs_raw.key_id
+LEFT JOIN keys AS root_keys ON root_keys.id=msgs_raw.root_id
+LEFT JOIN keys AS fork_keys ON fork_keys.id=msgs_raw.fork_id
+JOIN feed_keys ON feed_keys.id=msgs_raw.feed_key_id
 WHERE
-        authors.author = '@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519'
+        feed_keys.feed_key = '@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519'
         AND content_type = 'post'
         AND seq > 10
 LIMIT 10
@@ -115,51 +116,52 @@ LIMIT 10
 pub enum Link {
     Out {
         id: String,
-        author: String,
+        feed_key: String,
         timestamp: f64,
     },
     Back {
         id: String,
-        author: String,
+        feed_key: String,
         timestamp: f64,
     },
 }
 
-pub async fn select_out_links_by_message(
+pub async fn select_out_links_by_msg(
     connection: &mut SqliteConnection,
-    id: &str,
+    msg_key: &MsgKey,
 ) -> Result<Vec<Link>, Error> {
     /*
         SELECT
             links.link_from_key as id,
-            messages.author as author,
-            messages.received_time as timestamp
+            msgs.feed_key as feed_key,
+            msgs.received_time as timestamp
         FROM links
-        JOIN messages ON messages.key = links.link_from_key
+        JOIN msgs ON msgs.key = links.link_from_key
         WHERE link_to_key = ?
         AND NOT root = ?
         AND NOT content_type = 'about'
         AND NOT content_type = 'vote'
         AND NOT content_type = 'tag'
     */
+    let msg_key_string: String = msg_key.into();
     let rows = query(
         "
         SELECT
-                links.link_to_key as id,
-                authors.author as author,
-                messages_raw.asserted_time as timestamp
-        FROM links
-        JOIN keys ON keys.key = links.link_to_key
-        JOIN messages_raw ON messages_raw.key_id = keys.id
-        JOIN authors ON authors.id = messages_raw.author_id
-        LEFT JOIN keys AS root_keys ON root_keys.id = messages_raw.root_id
+                msg_links.link_to_key as id,
+                feed_keys.feed_key as feed_key,
+                msgs_raw.asserted_time as timestamp
+        FROM msg_links
+        JOIN msg_keys ON msg_keys.key = msg_links.link_to_key
+        JOIN msgs_raw ON msgs_raw.key_id = msg_keys.id
+        JOIN feed_keys ON feed_keys.id = msgs_raw.feed_key_id
+        LEFT JOIN msg_keys AS root_keys ON root_keys.id = msgs_raw.root_id
         WHERE link_from_key = ?1
         AND root_keys.key = ?2
         AND content_type = ?3
 ",
     )
-    .bind(id)
-    .bind(id)
+    .bind(&msg_key_string)
+    .bind(&msg_key_string)
     .bind("post")
     .fetch_all(connection)
     .await?;
@@ -169,7 +171,7 @@ pub async fn select_out_links_by_message(
         .map(|row| {
             Ok(Link::Back {
                 id: row.get(0),
-                author: row.get(1),
+                feed_key: row.get(1),
                 timestamp: row.get(2),
             })
         })
@@ -178,17 +180,17 @@ pub async fn select_out_links_by_message(
     Ok(out_links)
 }
 
-pub async fn select_back_links_by_message(
+pub async fn select_back_links_by_msg(
     connection: &mut SqliteConnection,
     id: &str,
 ) -> Result<Vec<Link>, Error> {
     /*
         SELECT
             links.link_from_key as id,
-            messages.author as author,
-            messages.received_time as timestamp
+            msgs.feed_key as feed_key,
+            msgs.received_time as timestamp
         FROM links
-        JOIN messages ON messages.key = links.link_from_key
+        JOIN msgs ON msgs.key = links.link_from_key
         WHERE link_to_key = ?
         AND NOT root = ?
         AND NOT content_type = 'about'
@@ -198,14 +200,14 @@ pub async fn select_back_links_by_message(
     let rows = query(
         "
         SELECT
-                links.link_from_key as id,
-                authors.author as author,
-                messages_raw.asserted_time as timestamp
-        FROM links
-        JOIN keys ON keys.key = links.link_from_key
-        JOIN messages_raw ON messages_raw.key_id = keys.id
-        JOIN authors ON authors.id = messages_raw.author_id
-        LEFT JOIN keys AS root_keys ON root_keys.id = messages_raw.root_id
+                msg_links.link_from_key as id,
+                feed_keys.feed_key as feed_key,
+                msgs_raw.asserted_time as timestamp
+        FROM msg_links
+        JOIN msg_keys ON msg_keys.key = msg_links.link_from_key
+        JOIN msgs_raw ON msgs_raw.key_id = msg_keys.id
+        JOIN feed_keys ON feed_keys.id = msgs_raw.feed_key_id
+        LEFT JOIN msg_keys AS root_keys ON root_keys.id = msgs_raw.root_id
         WHERE link_to_key = ?1
         AND root_keys.key = ?2
         AND content_type = ?3
@@ -222,7 +224,7 @@ pub async fn select_back_links_by_message(
         .map(|row| {
             Ok(Link::Back {
                 id: row.get(0),
-                author: row.get(1),
+                feed_key: row.get(1),
                 timestamp: row.get(2),
             })
         })
@@ -240,27 +242,27 @@ pub fn who_does_follows_id_one_way() {}
 pub fn friends_two_hops(connection: Connection) {
     //"
     //SELECT
-    //author as id
+    //feed_key as id
     //FROM
-    //authors
-    //WHERE authors.id IN (
+    //feed_keys
+    //WHERE feed_keys.id IN (
     //SELECT
-    //contact_author_id
+    //contact_feed_key_id
     //FROM contacts_raw
-    //WHERE author_id == 1 AND state == 1
+    //WHERE feed_key_id == 1 AND state == 1
     //UNION
     //SELECT
-    //friend_contacts_raw.contact_author_id
+    //friend_contacts_raw.contact_feed_key_id
     //FROM contacts_raw
-    //join contacts_raw AS friend_contacts_raw ON friend_contacts_raw.author_id == contacts_raw.contact_author_id
-    //WHERE contacts_raw.author_id == 1
+    //join contacts_raw AS friend_contacts_raw ON friend_contacts_raw.feed_key_id == contacts_raw.contact_feed_key_id
+    //WHERE contacts_raw.feed_key_id == 1
     //AND contacts_raw.state == 1
     //AND friend_contacts_raw.state == 1
     //EXCEPT
     //SELECT
-    //contact_author_id
+    //contact_feed_key_id
     //FROM contacts_raw
-    //WHERE author_id == 1
+    //WHERE feed_key_id == 1
     //AND state == -1)"
 }
 #[cfg(test)]

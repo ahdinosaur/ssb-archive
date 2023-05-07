@@ -4,5 +4,6 @@ members = [
   "ssb-query",
   "ssb-markdown",
   "ssb-ref",
-  "ssb-pages"
+  "ssb-pages",
+  "ssb-core"
 ]

@@ -1,6 +1,7 @@
 use log::trace;
 use serde_json::Value;
 use sqlx::{query, Error, SqliteConnection};
+use ssb_core::{ContactContent, Msg};
 
 use crate::sql::*;
 
@@ -24,35 +25,34 @@ pub async fn create_contacts_tables(connection: &mut SqliteConnection) -> Result
 
 pub async fn insert_or_update_contacts(
     connection: &mut SqliteConnection,
-    message: &SsbMessage,
+    msg: &Msg<Value>,
+    content: &ContactContent,
     _message_key_id: i64,
     is_decrypted: bool,
 ) -> Result<(), Error> {
-    if let Value::String(contact) = &message.value.content["contact"] {
-        //Ok what should this do:
-        //  - if the record already exists
-        //      - delete it if the new state is zero (this should only happen when record already
-        //      exists because you can't unfollow someone you already don't follow.
-        //      - update it if the new state is 1 or -1
-        //  - else create the new record. State should be a 1 or a -1
-        let is_blocking = message.value.content["blocking"].as_bool().unwrap_or(false);
-        let is_following = message.value.content["following"]
-            .as_bool()
-            .unwrap_or(false);
-        let state = if is_blocking {
-            -1
-        } else if is_following {
-            1
-        } else {
-            0
-        };
+    //Ok what should this do:
+    //  - if the record already exists
+    //      - delete it if the new state is zero (this should only happen when record already
+    //      exists because you can't unfollow someone you already don't follow.
+    //      - update it if the new state is 1 or -1
+    //  - else create the new record. State should be a 1 or a -1
 
-        let author_id = find_or_create_author(connection, &message.value.author).await?;
-        let contact_author_id = find_or_create_author(connection, contact).await?;
+    let is_blocking = content.blocking.unwrap_or(false);
+    let is_following = content.following.unwrap_or(false);
+    let state = if is_blocking {
+        -1
+    } else if is_following {
+        1
+    } else {
+        0
+    };
 
-        let row: Option<i64> = query(
-            "SELECT id FROM contacts_raw WHERE author_id = ? AND contact_author_id = ? AND is_decrypted = ?",
-        )
+    let author_id = find_or_create_feed_key(connection, &msg.value.author).await?;
+    let contact_author_id = find_or_create_feed_key(connection, &content.contact).await?;
+
+    let row: Option<i64> = query(
+        "SELECT id FROM contacts_raw WHERE author_id = ? AND contact_author_id = ? AND is_decrypted = ?",
+    )
         .bind(&author_id)
         .bind(&contact_author_id)
         .bind(is_decrypted)
@@ -60,23 +60,20 @@ pub async fn insert_or_update_contacts(
         .fetch_optional(&mut *connection)
         .await?;
 
-        if let Some(id) = row {
-            query("UPDATE contacts_raw SET state = ? WHERE id = ?")
-                .bind(state)
-                .bind(id)
-                .execute(connection)
-                .await?;
-        } else {
-            query(
-                "INSERT INTO contacts_raw (author_id, contact_author_id, is_decrypted, state) VALUES (?, ?, ?, ?)",
-            )
+    if let Some(id) = row {
+        query("UPDATE contacts_raw SET state = ? WHERE id = ?")
+            .bind(state)
+            .bind(id)
+            .execute(connection)
+            .await?;
+    } else {
+        query("INSERT INTO contacts_raw (author_id, contact_author_id, is_decrypted, state) VALUES (?, ?, ?, ?)")
             .bind(author_id)
             .bind(contact_author_id)
             .bind(is_decrypted)
             .bind(state)
             .execute(connection)
             .await?;
-        }
     }
 
     Ok(())

@@ -1,65 +1,56 @@
 use base64::engine::{general_purpose::STANDARD as b64, Engine};
-use flumedb::flume_view::{FlumeView, Sequence};
+use flumedb::flume_view::Sequence;
 use log::{info, trace};
 use private_box::Keypair;
 use serde_derive::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{from_value, Error as JsonError, Value};
 use sqlx::{
     query,
-    sqlite::{SqliteConnection, SqliteRow},
-    Connection, Error as SqlError, Row,
+    sqlite::{SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqliteRow},
+    ConnectOptions, Connection, Error as SqlError, Row,
 };
+use ssb_core::{BlobLink, KeyError, Link, Msg, MsgContent, MsgValue};
+use std::str::FromStr;
 use thiserror::Error as ThisError;
 
 mod abouts;
-mod authors;
+mod blob_keys;
 mod blob_links;
-mod blobs;
 mod branches;
 mod contacts;
-mod keys;
-mod links;
-mod mentions;
-mod messages;
+mod feed_keys;
+mod feed_links;
 mod migrations;
+mod msg_keys;
+mod msg_links;
+mod msgs;
 mod queries;
 mod votes;
 use self::abouts::*;
-use self::authors::*;
+use self::blob_keys::*;
 use self::blob_links::*;
-use self::blobs::*;
 use self::branches::*;
 use self::contacts::*;
-use self::keys::*;
-use self::links::*;
-use self::mentions::*;
-use self::messages::*;
+use self::feed_keys::*;
+use self::feed_links::*;
 use self::migrations::*;
-pub use self::queries::SelectAllMessagesByFeedOptions;
+use self::msg_keys::*;
+use self::msg_links::*;
+use self::msgs::*;
+pub use self::queries::SelectAllMsgsByFeedOptions;
 pub(crate) use self::queries::*;
 use self::votes::*;
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SsbValue {
-    pub author: String,
-    pub sequence: u32,
-    pub timestamp: f64,
-    pub content: Value,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SsbMessage {
-    pub key: String,
-    pub value: SsbValue,
-    pub timestamp: f64,
-}
 
 #[derive(Debug, ThisError)]
 pub enum SqlViewError {
     #[error("Db failed integrity check")]
     DbFailedIntegrityCheck {},
-    #[error("Sql error")]
+    #[error("Sql error: {0}")]
     Sql(#[from] SqlError),
+    #[error("Json error: {0}")]
+    Json(#[from] JsonError),
+    #[error("Id format error: {0}")]
+    IdFormat(#[from] KeyError),
 }
 
 pub struct SqlView {
@@ -68,7 +59,11 @@ pub struct SqlView {
 }
 
 async fn create_connection(path: &str) -> Result<SqliteConnection, SqlError> {
-    SqliteConnection::connect(path).await
+    SqliteConnectOptions::from_str(path)?
+        .journal_mode(SqliteJournalMode::Wal)
+        .create_if_missing(true)
+        .connect()
+        .await
 }
 
 impl SqlView {
@@ -90,7 +85,6 @@ impl SqlView {
             create_views(&mut connection).await?;
 
             set_db_version(&mut connection).await?;
-            set_author_that_is_me(&mut connection, pub_key).await?;
         }
 
         set_pragmas(&mut connection).await?;
@@ -102,10 +96,13 @@ impl SqlView {
     }
 
     pub async fn get_seq_by_key(&mut self, key: &str) -> Result<i64, SqlViewError> {
-        let result: i64 = query("SELECT flume_seq FROM messages_raw JOIN keys ON messages_raw.key_id=keys.id WHERE keys.key=?1")
-            .bind(key)
-            .map(|row: SqliteRow| row.get(0))
-            .fetch_one(&mut self.connection).await?;
+        let result: i64 = query(
+            "SELECT flume_seq FROM msgs_raw JOIN keys ON msgs_raw.key_id=keys.id WHERE keys.key=?1",
+        )
+        .bind(key)
+        .map(|row: SqliteRow| row.get(0))
+        .fetch_one(&mut self.connection)
+        .await?;
 
         Ok(result)
     }
@@ -119,7 +116,7 @@ impl SqlView {
         let secret_keys = self.secret_keys.to_owned();
         let items_cloned = items.to_owned();
         self.connection
-            .transaction::<'_, _, _, SqlError>(move |mut conn| {
+            .transaction::<'_, _, _, SqlViewError>(move |mut conn| {
                 Box::pin(async move {
                     for item in items_cloned {
                         append_item(&mut conn, &secret_keys, &item.0, &item.1).await?;
@@ -146,7 +143,7 @@ impl SqlView {
     }
 
     pub async fn get_latest(&mut self) -> Result<Option<Sequence>, SqlViewError> {
-        let res: Option<i64> = query("SELECT MAX(flume_seq) FROM messages_raw")
+        let res: Option<i64> = query("SELECT MAX(flume_seq) FROM msgs_raw")
             .map(|row: SqliteRow| row.get(0))
             .fetch_optional(&mut self.connection)
             .await?;
@@ -157,66 +154,27 @@ impl SqlView {
     }
 }
 
-fn find_values_in_object_by_key<'a>(
-    obj: &'a serde_json::Value,
-    key: &str,
-    values: &mut Vec<&'a serde_json::Value>,
-) {
-    if let Some(val) = obj.get(key) {
-        values.push(val)
-    }
-
-    match obj {
-        Value::Array(arr) => {
-            for val in arr {
-                find_values_in_object_by_key(val, key, values);
-            }
-        }
-        Value::Object(kv) => {
-            for val in kv.values() {
-                match val {
-                    Value::Object(_) => find_values_in_object_by_key(val, key, values),
-                    Value::Array(_) => find_values_in_object_by_key(val, key, values),
-                    _ => (),
-                }
-            }
-        }
-        _ => (),
-    }
-}
-
-fn attempt_decryption(mut message: SsbMessage, secret_keys: &[Keypair]) -> (bool, SsbMessage) {
+fn attempt_decryption(mut msg: Msg<Value>, secret_keys: &[Keypair]) -> (bool, Msg<Value>) {
     let mut is_decrypted = false;
 
-    message = match message.value.content["type"] {
-        Value::Null => {
-            let content = message.value.content.clone();
-            let string = &content.as_str().unwrap();
+    if let Value::String(ref content) = msg.value.content {
+        let string = content.trim_end_matches(".box");
 
-            let string = string.trim_end_matches(".box");
-
-            let decoded = b64.decode(string);
-            if let Ok(bytes) = decoded {
-                for secret_key in secret_keys {
-                    message.value.content = private_box::decrypt(&bytes, secret_key)
-                        .and_then(|data| {
-                            is_decrypted = true;
-                            serde_json::from_slice(&data).ok()
-                        })
-                        .unwrap_or(Value::Null); //If we can't decrypt it, throw it away.
-
-                    if is_decrypted {
-                        break;
+        let decoded = b64.decode(string);
+        if let Ok(bytes) = decoded {
+            for secret_key in secret_keys {
+                if let Some(decrypted) = private_box::decrypt(&bytes, secret_key) {
+                    is_decrypted = true;
+                    if let Ok(new_content) = serde_json::from_slice(&decrypted) {
+                        msg.value.content = new_content;
                     }
+                    break;
                 }
             }
-
-            message
         }
-        _ => message,
     };
 
-    (is_decrypted, message)
+    (is_decrypted, msg)
 }
 
 async fn append_item(
@@ -224,38 +182,121 @@ async fn append_item(
     secret_keys: &[Keypair],
     seq: &Sequence,
     item: &[u8],
-) -> Result<(), SqlError> {
-    let message: SsbMessage = serde_json::from_slice(item).unwrap();
+) -> Result<(), SqlViewError> {
+    let msg: Msg<Value> = serde_json::from_slice(item).unwrap();
 
-    let (is_decrypted, message) = attempt_decryption(message, secret_keys);
+    let (is_decrypted, msg) = attempt_decryption(msg, secret_keys);
 
-    let message_key_id = find_or_create_key(connection, &message.key).await.unwrap();
+    let msg_key_id = find_or_create_msg_key(connection, &msg.key).await.unwrap();
 
-    // votes are a kind of backlink, but we want to put them in their own table.
-    match &message.value.content["type"] {
-        Value::String(type_string) if type_string == "vote" => {
-            insert_or_update_votes(connection, &message).await?;
-        }
-        _ => {
-            let mut links = Vec::new();
-            find_values_in_object_by_key(&message.value.content, "link", &mut links);
-            insert_links(connection, links.as_slice(), message_key_id).await?;
-            insert_mentions(connection, links.as_slice(), message_key_id).await?;
-            insert_blob_links(connection, links.as_slice(), message_key_id).await?;
-        }
+    if !msg.value.content.is_object() {
+        // early return if content is not object
+        // eprintln!("No content: {:?}", msg.value.content);
+        return Ok(());
     }
 
-    insert_branches(connection, &message, message_key_id).await?;
-    insert_message(
-        connection,
-        &message,
-        *seq as i64,
-        message_key_id,
-        is_decrypted,
-    )
-    .await?;
-    insert_or_update_contacts(connection, &message, message_key_id, is_decrypted).await?;
-    insert_abouts(connection, &message, message_key_id).await?;
+    let content_result: Result<MsgContent, JsonError> = from_value(msg.value.content.clone());
+
+    let content = match content_result {
+        Ok(content) => content,
+        Err(error) => {
+            // early return if content is misformatted
+            eprintln!("Error: {}", error);
+            eprintln!("-> Content: {:?}", msg.value.content);
+            // return Err(error.into());
+            return Ok(());
+        }
+    };
+
+    match content {
+        MsgContent::Post(post) => {
+            if let Some(links) = post.mentions {
+                let mut msg_keys = Vec::new();
+                let mut feed_keys = Vec::new();
+                let mut blob_keys = Vec::new();
+                let mut hashtag_keys = Vec::new();
+                for link in links.iter() {
+                    match link {
+                        Link::Msg { link, .. } => msg_keys.push(link),
+                        Link::Feed { link, .. } => feed_keys.push(link),
+                        Link::Blob(BlobLink { link, .. }) => blob_keys.push(link),
+                        Link::Hashtag { link } => hashtag_keys.push(link),
+                    }
+                }
+                insert_links(connection, msg_keys.as_slice(), msg_key_id).await?;
+                insert_feed_links(connection, feed_keys.as_slice(), msg_key_id).await?;
+                insert_blob_links(connection, blob_keys.as_slice(), msg_key_id).await?;
+            }
+
+            let root_key_id = if let Some(root) = post.root {
+                trace!("get root key id");
+                Some(find_or_create_msg_key(connection, &root).await?)
+            } else {
+                None
+            };
+            let fork_key_id = if let Some(fork) = post.fork {
+                trace!("get fork key id");
+                Some(find_or_create_msg_key(connection, &fork).await?)
+            } else {
+                None
+            };
+            insert_msg(
+                connection,
+                &msg,
+                *seq as i64,
+                msg_key_id,
+                root_key_id,
+                fork_key_id,
+                is_decrypted,
+            )
+            .await?;
+            if let Some(branch) = post.branch {
+                insert_branches(connection, branch.as_slice(), msg_key_id).await?;
+            }
+        }
+        MsgContent::Contact(contact) => {
+            insert_or_update_contacts(connection, &msg, &contact, msg_key_id, is_decrypted).await?;
+            insert_msg(
+                connection,
+                &msg,
+                *seq as i64,
+                msg_key_id,
+                None,
+                None,
+                is_decrypted,
+            )
+            .await?;
+        }
+        MsgContent::Vote(vote) => {
+            insert_or_update_votes(connection, &msg, &vote).await?;
+            insert_msg(
+                connection,
+                &msg,
+                *seq as i64,
+                msg_key_id,
+                None,
+                None,
+                is_decrypted,
+            )
+            .await?;
+        }
+        MsgContent::About(about) => {
+            insert_abouts(connection, &msg, &about, msg_key_id).await?;
+            insert_msg(
+                connection,
+                &msg,
+                *seq as i64,
+                msg_key_id,
+                None,
+                None,
+                is_decrypted,
+            )
+            .await?;
+        }
+        MsgContent::Unknown => {
+            // println!("Unknown content: {:?}", msg.value.content);
+        }
+    }
 
     Ok(())
 }
@@ -272,41 +313,40 @@ async fn set_pragmas(connection: &mut SqliteConnection) -> Result<(), SqlError> 
 
 async fn create_tables(connection: &mut SqliteConnection) -> Result<(), SqlError> {
     create_migrations_tables(connection).await?;
-    create_messages_tables(connection).await?;
-    create_authors_tables(connection).await?;
-    create_keys_tables(connection).await?;
-    create_links_tables(connection).await?;
+    create_msgs_tables(connection).await?;
+    create_msg_keys_tables(connection).await?;
+    create_msg_links_tables(connection).await?;
+    create_feed_keys_tables(connection).await?;
+    create_feed_links_tables(connection).await?;
+    create_blob_keys_tables(connection).await?;
+    create_blob_links_tables(connection).await?;
     create_contacts_tables(connection).await?;
     create_branches_tables(connection).await?;
-    create_mentions_tables(connection).await?;
     create_abouts_tables(connection).await?;
-    create_blobs_tables(connection).await?;
-    create_blob_links_tables(connection).await?;
     create_votes_tables(connection).await?;
 
     Ok(())
 }
 
 async fn create_views(connection: &mut SqliteConnection) -> Result<(), SqlError> {
-    create_messages_views(connection).await?;
-    create_links_views(connection).await?;
+    create_msgs_views(connection).await?;
+    create_msg_links_views(connection).await?;
     create_blob_links_views(connection).await?;
     create_abouts_views(connection).await?;
-    create_mentions_views(connection).await?;
     create_votes_indices(connection).await?;
     Ok(())
 }
 
 async fn create_indices(connection: &mut SqliteConnection) -> Result<(), SqlError> {
-    create_messages_indices(connection).await?;
-    create_links_indices(connection).await?;
+    create_msgs_indices(connection).await?;
+    create_msg_keys_indices(connection).await?;
+    create_msg_links_indices(connection).await?;
+    create_feed_keys_indices(connection).await?;
+    create_feed_links_indices(connection).await?;
     create_blob_links_indices(connection).await?;
     create_contacts_indices(connection).await?;
-    create_keys_indices(connection).await?;
     create_branches_indices(connection).await?;
-    create_authors_indices(connection).await?;
     create_abouts_indices(connection).await?;
-    create_mentions_indices(connection).await?;
     Ok(())
 }
 
@@ -354,7 +394,7 @@ mod test {
   "key": "%KKPLj1tWfuVhCvgJz2hG/nIsVzmBRzUJaqHv+sb+n1c=.sha256",
   "value": {
     "previous": "%xsMQA2GrsZew0GSxmDSBaoxDafVaUJ07YVaDGcp65a4=.sha256",
-    "author": "@QlCTpvY7p9ty2yOFrv1WU1AE88aoQc4Y7wYal7PFc+w=.ed25519",
+    "feed_key": "@QlCTpvY7p9ty2yOFrv1WU1AE88aoQc4Y7wYal7PFc+w=.ed25519",
     "sequence": 4797,
     "timestamp": 1543958997985,
     "hash": "sha256",
@@ -369,7 +409,7 @@ mod test {
       "channel": null,
       "recps": null,
       "text": "If I understand correctly, cjdns overlaying over old IP (which is basically all of the cjdns uses so far) still requires old IP addresses to introduce you to the cjdns network, so the chicken and egg problem is still there.",
-      "mentions": []
+      "feed_links": []
     },
     "signature": "mi5j/buYZdsiH8l6CVWRqdBKe+0UG6tVTOoVVjMhYl38Nkmb8wiIEfe7zu0JWuiHkaAIq+0/ZqYr6aV14j4fAw==.sig.ed25519"
   },

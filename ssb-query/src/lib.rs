@@ -6,10 +6,12 @@ use itertools::Itertools;
 use private_box::Keypair;
 
 pub mod sql;
-pub use sql::SelectAllMessagesByFeedOptions;
+use serde_json::Value;
+pub use sql::SelectAllMsgsByFeedOptions;
+pub use sql::SqlView;
 use sql::SqlViewError;
-use sql::{select_all_messages_by_feed, select_max_seq_by_feed};
-pub use sql::{SqlView, SsbMessage, SsbValue};
+use sql::{select_all_msgs_by_feed, select_max_seq_by_feed};
+use ssb_core::{FeedKey, Msg};
 
 pub struct SsbQuery {
     view: SqlView,
@@ -71,14 +73,17 @@ impl SsbQuery {
 
     // queries
 
-    pub async fn select_all_messages_by_feed(
+    pub async fn select_all_msgs_by_feed(
         &mut self,
-        options: SelectAllMessagesByFeedOptions<'_>,
-    ) -> Result<Vec<SsbMessage>, SqlViewError> {
-        Ok(select_all_messages_by_feed(&mut self.view.connection, options).await?)
+        options: SelectAllMsgsByFeedOptions<'_>,
+    ) -> Result<Vec<Msg<Value>>, SqlViewError> {
+        Ok(select_all_msgs_by_feed(&mut self.view.connection, options).await?)
     }
 
-    pub async fn select_max_seq_by_feed(&mut self, feed_id: &str) -> Result<i64, SqlViewError> {
-        Ok(select_max_seq_by_feed(&mut self.view.connection, feed_id).await?)
+    pub async fn select_max_seq_by_feed(
+        &mut self,
+        feed_key: &FeedKey,
+    ) -> Result<i64, SqlViewError> {
+        Ok(select_max_seq_by_feed(&mut self.view.connection, feed_key).await?)
     }
 }

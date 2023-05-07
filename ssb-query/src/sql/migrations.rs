@@ -19,15 +19,17 @@ pub async fn create_migrations_tables(connection: &mut SqliteConnection) -> Resu
 }
 
 pub async fn is_db_up_to_date(connection: &mut SqliteConnection) -> Result<bool, Error> {
-    let result: Option<u32> = query("SELECT version FROM migrations LIMIT 1")
+    let result: Result<Option<u32>, Error> = query("SELECT version FROM migrations LIMIT 1")
         .map(|row: SqliteRow| row.get(0))
         .fetch_optional(connection)
-        .await?;
+        .await;
 
-    if let Some(version) = result {
-        Ok(version == MIGRATION_VERSION_NUMBER)
-    } else {
-        Ok(false)
+    println!("version: {:?}", result);
+
+    match result {
+        Ok(Some(version)) => Ok(version == MIGRATION_VERSION_NUMBER),
+        Ok(None) => Ok(false),
+        Err(_) => Ok(false),
     }
 }
 
