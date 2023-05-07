@@ -18,7 +18,8 @@ itertools = "0.10.5"
 flumedb = "0.1.6"
 private-box = "0.6.0"
 sqlx = { version = "0.6.3", features = ["runtime-tokio-native-tls", "sqlite", "json"] }
-ssb-core = { path = "../ssb-core" }
+ssb-ref = { path = "../ssb-ref" }
+ssb-msg = { path = "../ssb-msg" }
 
 [dev-dependencies]
 tokio = "1.28.0"

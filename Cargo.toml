@@ -1,9 +1,9 @@
 [workspace]
 members = [
   "ssb-archive",
+  "ssb-ref",
+  "ssb-msg",
   "ssb-query",
   "ssb-markdown",
-  "ssb-ref",
-  "ssb-pages",
-  "ssb-core"
+  "ssb-pages"
 ]

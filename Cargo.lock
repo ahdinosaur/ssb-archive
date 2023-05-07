@@ -1916,21 +1916,12 @@ name = "ssb-archive"
 version = "0.1.0"
 dependencies = [
  "serde_json",
- "ssb-core",
  "ssb-markdown",
+ "ssb-msg",
  "ssb-query",
+ "ssb-ref",
  "thiserror",
  "tokio",
-]
-
-[[package]]
-name = "ssb-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "serde_with",
- "thiserror",
 ]
 
 [[package]]
@@ -1962,6 +1953,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ssb-msg"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_with",
+ "ssb-ref",
+ "thiserror",
+]
+
+[[package]]
 name = "ssb-multiformats"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1978,9 +1980,10 @@ version = "0.1.0"
 dependencies = [
  "axohtml",
  "serde_json",
- "ssb-core",
  "ssb-markdown",
+ "ssb-msg",
  "ssb-query",
+ "ssb-ref",
 ]
 
 [[package]]
@@ -1996,7 +1999,8 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "sqlx",
- "ssb-core",
+ "ssb-msg",
+ "ssb-ref",
  "thiserror",
  "tokio",
 ]

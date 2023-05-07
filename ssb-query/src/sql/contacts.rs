@@ -1,7 +1,7 @@
 use log::trace;
 use serde_json::Value;
 use sqlx::{query, Error, SqliteConnection};
-use ssb_core::{ContactContent, Msg};
+use ssb_msg::{ContactContent, Msg};
 
 use crate::sql::*;
 
@@ -11,8 +11,8 @@ pub async fn create_contacts_tables(connection: &mut SqliteConnection) -> Result
     query(
         "CREATE TABLE IF NOT EXISTS contacts_raw(
             id INTEGER PRIMARY KEY,
-            author_id INTEGER,
-            contact_author_id INTEGER,
+            feed_ref_id INTEGER,
+            contact_feed_ref_id INTEGER,
             is_decrypted BOOLEAN,
             state INTEGER
         )",
@@ -27,7 +27,7 @@ pub async fn insert_or_update_contacts(
     connection: &mut SqliteConnection,
     msg: &Msg<Value>,
     content: &ContactContent,
-    _message_key_id: i64,
+    _msg_ref_id: i64,
     is_decrypted: bool,
 ) -> Result<(), Error> {
     //Ok what should this do:
@@ -47,14 +47,14 @@ pub async fn insert_or_update_contacts(
         0
     };
 
-    let author_id = find_or_create_feed_key(connection, &msg.value.author).await?;
-    let contact_author_id = find_or_create_feed_key(connection, &content.contact).await?;
+    let feed_ref_id = find_or_create_feed_ref(connection, &msg.value.author).await?;
+    let contact_feed_ref_id = find_or_create_feed_ref(connection, &content.contact).await?;
 
     let row: Option<i64> = query(
-        "SELECT id FROM contacts_raw WHERE author_id = ? AND contact_author_id = ? AND is_decrypted = ?",
+        "SELECT id FROM contacts_raw WHERE feed_ref_id = ? AND contact_feed_ref_id = ? AND is_decrypted = ?",
     )
-        .bind(&author_id)
-        .bind(&contact_author_id)
+        .bind(&feed_ref_id)
+        .bind(&contact_feed_ref_id)
         .bind(is_decrypted)
         .map(|row: sqlx::sqlite::SqliteRow| row.get(0))
         .fetch_optional(&mut *connection)
@@ -67,9 +67,9 @@ pub async fn insert_or_update_contacts(
             .execute(connection)
             .await?;
     } else {
-        query("INSERT INTO contacts_raw (author_id, contact_author_id, is_decrypted, state) VALUES (?, ?, ?, ?)")
-            .bind(author_id)
-            .bind(contact_author_id)
+        query("INSERT INTO contacts_raw (feed_ref_id, contact_feed_ref_id, is_decrypted, state) VALUES (?, ?, ?, ?)")
+            .bind(feed_ref_id)
+            .bind(contact_feed_ref_id)
             .bind(is_decrypted)
             .bind(state)
             .execute(connection)
@@ -80,20 +80,20 @@ pub async fn insert_or_update_contacts(
 }
 
 pub async fn create_contacts_indices(connection: &mut SqliteConnection) -> Result<(), Error> {
-    create_contacts_author_id_state_index(connection).await
+    create_contacts_feed_ref_id_state_index(connection).await
 }
 
-async fn create_contacts_author_id_state_index(conn: &mut SqliteConnection) -> Result<(), Error> {
-    trace!("Creating contacts author_id index");
+async fn create_contacts_feed_ref_id_state_index(conn: &mut SqliteConnection) -> Result<(), Error> {
+    trace!("Creating contacts feed_ref_id index");
 
     query(
-        "CREATE INDEX IF NOT EXISTS contacts_raw_contact_author_id_state_index on contacts_raw (contact_author_id)",
+        "CREATE INDEX IF NOT EXISTS contacts_contact_feed_ref_id_state_index on contacts_raw (contact_feed_ref_id)",
     )
     .execute(&mut *conn)
     .await?;
 
     query(
-        "CREATE INDEX IF NOT EXISTS contacts_raw_author_id_state_index on contacts_raw (author_id, state)",
+        "CREATE INDEX IF NOT EXISTS contacts_feed_ref_id_state_index on contacts_raw (feed_ref_id, state)",
     )
     .execute(&mut *conn)
     .await?;
