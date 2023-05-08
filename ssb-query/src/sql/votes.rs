@@ -42,9 +42,6 @@ pub async fn insert_or_update_votes(
 
     if let Some((id, feed_seq)) = row {
         if feed_seq < msg.value.sequence as i64 {
-            if content.vote.value > 1 {
-                println!("{:?}", msg.key.to_string());
-            }
             query("UPDATE votes SET value = ? WHERE id = ?")
                 .bind(content.vote.value)
                 .bind(id)

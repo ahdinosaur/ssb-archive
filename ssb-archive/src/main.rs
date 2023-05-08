@@ -1,7 +1,7 @@
 // use std::{thread::sleep, time::Duration};
 
 use ssb_markdown::render;
-use ssb_query::{sql::SqlViewError, SelectAllMsgsByFeedOptions, SsbQuery};
+use ssb_query::{QueryError, SelectAllMsgsByFeedOptions, SsbQuery};
 use ssb_ref::{FeedRef, RefError};
 use thiserror::Error as ThisError;
 
@@ -18,7 +18,7 @@ async fn main() {
 #[derive(Debug, ThisError)]
 enum Error {
     #[error("Query error: {0}")]
-    Query(#[from] SqlViewError),
+    Query(#[from] QueryError),
     #[error("Ref format error: {0}")]
     RefFormat(#[from] RefError),
 }
@@ -58,10 +58,10 @@ async fn exec() -> Result<(), Error> {
     let feed_ref: FeedRef = "@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519"
         .to_owned()
         .try_into()?;
-    let max_feed_seq = view.select_max_seq_by_feed(&feed_ref).await.unwrap();
+    let max_feed_seq = view.get_max_seq_by_feed(&feed_ref).await.unwrap();
 
     let messages = view
-        .select_all_msgs_by_feed(SelectAllMsgsByFeedOptions {
+        .get_all_msgs_by_feed(SelectAllMsgsByFeedOptions {
             feed_ref: &feed_ref,
             content_type: "post",
             page_size: 10,

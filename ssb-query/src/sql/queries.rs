@@ -1,7 +1,5 @@
 use crate::sql::*;
-use serde_json::Value;
-use sqlx::{query, Error, Row, SqliteConnection};
-use ssb_msg::Msg;
+use sqlx::{query, sqlite::SqliteRow, Error, Row, SqliteConnection};
 use ssb_ref::{FeedRef, MsgRef};
 
 pub async fn select_max_seq_by_feed<'a>(
@@ -35,22 +33,14 @@ pub struct SelectAllMsgsByFeedOptions<'a> {
     pub is_decrypted: bool,
 }
 
-pub async fn select_all_msgs_by_feed<'a>(
+pub async fn select_all_msg_log_seqs_by_feed<'a>(
     connection: &mut SqliteConnection,
     options: SelectAllMsgsByFeedOptions<'a>,
-) -> Result<Vec<Msg<Value>>, Error> {
-    let rows = query(
+) -> Result<Vec<Sequence>, Error> {
+    let msg_log_seqs = query(
         "
-        SELECT
-            feed_seq,
-            msg_refs.msg_ref as msg_ref,
-            feed_refs.feed_ref as feed_ref,
-            timestamp_received,
-            timestamp_asserted,
-            content,
-            is_decrypted
+        SELECT log_seq
         FROM msgs
-        JOIN msg_refs ON msg_refs.id = msgs.msg_ref_id
         JOIN feed_refs ON feed_refs.id = msgs.feed_ref_id
         WHERE
             feed_refs.feed_ref = ?
@@ -66,26 +56,11 @@ pub async fn select_all_msgs_by_feed<'a>(
     .bind(options.less_than_feed_seq)
     .bind(options.is_decrypted)
     .bind(options.page_size)
+    .map(|row: SqliteRow| row.get::<i64, _>(0) as Sequence)
     .fetch_all(connection)
     .await?;
 
-    let msgs = rows
-        .into_iter()
-        .map(|row| {
-            Ok(Msg {
-                key: MsgRef::from_string(row.get(1)).unwrap(),
-                value: MsgValue {
-                    author: FeedRef::from_string(row.get(2)).unwrap(),
-                    sequence: row.get::<i64, _>(0) as u64,
-                    timestamp_asserted: row.get(4),
-                    content: row.get(5),
-                },
-                timestamp_received: row.get(3),
-            })
-        })
-        .collect::<Result<Vec<Msg<Value>>, Error>>()?;
-
-    Ok(msgs)
+    Ok(msg_log_seqs)
 }
 // select all posts by a user
 //   - greater than seq

@@ -24,8 +24,6 @@ pub async fn is_db_up_to_date(connection: &mut SqliteConnection) -> Result<bool,
         .fetch_optional(connection)
         .await;
 
-    println!("version: {:?}", result);
-
     match result {
         Ok(Some(version)) => Ok(version == MIGRATION_VERSION_NUMBER),
         Ok(None) => Ok(false),

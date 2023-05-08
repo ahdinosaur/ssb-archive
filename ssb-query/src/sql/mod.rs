@@ -9,7 +9,7 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqliteRow},
     ConnectOptions, Connection, Error as SqlError, Row,
 };
-use ssb_msg::{BlobLink, Link, Msg, MsgContent, MsgValue};
+use ssb_msg::{BlobLink, Link, Msg, MsgContent};
 use ssb_ref::RefError;
 use std::str::FromStr;
 use thiserror::Error as ThisError;
@@ -25,6 +25,7 @@ mod migrations;
 mod msg_links;
 mod msg_refs;
 mod msgs;
+mod posts;
 mod queries;
 mod votes;
 use self::abouts::*;
@@ -37,7 +38,9 @@ use self::feed_refs::*;
 use self::migrations::*;
 use self::msg_links::*;
 use self::msg_refs::*;
+pub(crate) use self::msgs::get_msg_log_seq;
 use self::msgs::*;
+use self::posts::*;
 pub use self::queries::SelectAllMsgsByFeedOptions;
 pub(crate) use self::queries::*;
 use self::votes::*;
@@ -89,17 +92,6 @@ impl SqlView {
             connection,
             secret_keys,
         })
-    }
-
-    pub async fn get_seq_by_key(&mut self, key: &str) -> Result<i64, SqlViewError> {
-        let result: i64 =
-            query("SELECT log_seq FROM msgs JOIN keys ON msgs.key_id=keys.id WHERE keys.key=?1")
-                .bind(key)
-                .map(|row: SqliteRow| row.get(0))
-                .fetch_one(&mut self.connection)
-                .await?;
-
-        Ok(result)
     }
 
     pub async fn append_batch(
@@ -175,7 +167,7 @@ fn attempt_decryption(mut msg: Msg<Value>, secret_keys: &[Keypair]) -> (bool, Ms
 async fn append_item(
     connection: &mut SqliteConnection,
     secret_keys: &[Keypair],
-    seq: &Sequence,
+    log_seq: &Sequence,
     item: &[u8],
 ) -> Result<(), SqlViewError> {
     let msg: Msg<Value> = serde_json::from_slice(item).unwrap();
@@ -205,7 +197,7 @@ async fn append_item(
 
     match content {
         MsgContent::Post(post) => {
-            if let Some(links) = post.mentions {
+            if let Some(links) = &post.mentions {
                 let mut msg_refs = Vec::new();
                 let mut feed_refs = Vec::new();
                 let mut blob_refs = Vec::new();
@@ -223,70 +215,23 @@ async fn append_item(
                 insert_blob_links(connection, blob_refs.as_slice(), msg_ref_id).await?;
             }
 
-            let root_key_id = if let Some(root) = post.root {
-                trace!("get root key id");
-                Some(find_or_create_msg_ref(connection, &root).await?)
-            } else {
-                None
-            };
-            let fork_key_id = if let Some(fork) = post.fork {
-                trace!("get fork key id");
-                Some(find_or_create_msg_ref(connection, &fork).await?)
-            } else {
-                None
-            };
-            insert_msg(
-                connection,
-                &msg,
-                *seq as i64,
-                msg_ref_id,
-                root_key_id,
-                fork_key_id,
-                is_decrypted,
-            )
-            .await?;
+            insert_post(connection, &msg, &post, msg_ref_id).await?;
             if let Some(branch) = post.branch {
                 insert_branches(connection, branch.as_slice(), msg_ref_id).await?;
             }
+            insert_msg(connection, &msg, log_seq, msg_ref_id, is_decrypted).await?;
         }
         MsgContent::Contact(contact) => {
             insert_or_update_contacts(connection, &msg, &contact, msg_ref_id, is_decrypted).await?;
-            insert_msg(
-                connection,
-                &msg,
-                *seq as i64,
-                msg_ref_id,
-                None,
-                None,
-                is_decrypted,
-            )
-            .await?;
+            insert_msg(connection, &msg, log_seq, msg_ref_id, is_decrypted).await?;
         }
         MsgContent::Vote(vote) => {
             insert_or_update_votes(connection, &msg, &vote).await?;
-            insert_msg(
-                connection,
-                &msg,
-                *seq as i64,
-                msg_ref_id,
-                None,
-                None,
-                is_decrypted,
-            )
-            .await?;
+            insert_msg(connection, &msg, log_seq, msg_ref_id, is_decrypted).await?;
         }
         MsgContent::About(about) => {
             insert_abouts(connection, &msg, &about).await?;
-            insert_msg(
-                connection,
-                &msg,
-                *seq as i64,
-                msg_ref_id,
-                None,
-                None,
-                is_decrypted,
-            )
-            .await?;
+            insert_msg(connection, &msg, log_seq, msg_ref_id, is_decrypted).await?;
         }
         MsgContent::Unknown => {
             // println!("Unknown content: {:?}", msg.value.content);
@@ -319,6 +264,7 @@ async fn create_tables(connection: &mut SqliteConnection) -> Result<(), SqlError
     create_branches_tables(connection).await?;
     create_abouts_tables(connection).await?;
     create_votes_tables(connection).await?;
+    create_posts_tables(connection).await?;
 
     Ok(())
 }
@@ -334,6 +280,7 @@ async fn create_indices(connection: &mut SqliteConnection) -> Result<(), SqlErro
     create_branches_indices(connection).await?;
     create_abouts_indices(connection).await?;
     create_votes_indices(connection).await?;
+    create_posts_indices(connection).await?;
     Ok(())
 }
 
