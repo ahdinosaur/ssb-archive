@@ -8,7 +8,7 @@ use hashtag_regex::HASHTAG_RE_STRING;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::convert::TryFrom;
+use std::{convert::TryFrom, path::PathBuf};
 use thiserror::Error as ThisError;
 use urlencoding::encode;
 
@@ -65,6 +65,10 @@ impl FeedRef {
 
     pub fn to_page_url(&self) -> String {
         format!("/feed/{}", self.urlsafe_data())
+    }
+
+    pub fn to_page_path(&self) -> PathBuf {
+        format!("feed/{}", self.urlsafe_data()).into()
     }
 
     fn string_data(&self) -> String {
@@ -139,6 +143,10 @@ impl MsgRef {
         format!("/message/{}", self.urlsafe_data())
     }
 
+    pub fn to_page_path(&self) -> PathBuf {
+        format!("message/{}", self.urlsafe_data()).into()
+    }
+
     fn string_data(&self) -> String {
         b64.encode(self.0.clone())
     }
@@ -211,6 +219,10 @@ impl BlobRef {
         format!("/blob/{}", self.urlsafe_data())
     }
 
+    pub fn to_page_path(&self) -> PathBuf {
+        format!("blob/{}", self.urlsafe_data()).into()
+    }
+
     fn string_data(&self) -> String {
         b64.encode(self.0.clone())
     }
@@ -244,7 +256,7 @@ impl From<&BlobRef> for String {
 pub struct HashtagRef(String);
 
 impl HashtagRef {
-    // From string that starts with &
+    // From string that starts with #
     pub fn from_string(string: String) -> Result<Self, RefError> {
         if !Self::is_match(string.as_str()) {
             Err(RefError::BadFormat {
@@ -287,6 +299,12 @@ impl HashtagRef {
         let tag = self.parse_tag();
         let urlsafe_tag = encode(tag.as_str());
         format!("/hashtag/{}", urlsafe_tag)
+    }
+
+    pub fn to_page_path(&self) -> PathBuf {
+        let tag = self.parse_tag();
+        let urlsafe_tag = encode(tag.as_str());
+        format!("hashtag/{}", urlsafe_tag).into()
     }
 
     fn parse_tag(&self) -> String {
@@ -382,6 +400,15 @@ impl LinkRef {
             LinkRef::Msg(msg_ref) => msg_ref.to_page_url(),
             LinkRef::Blob(blob_ref) => blob_ref.to_page_url(),
             LinkRef::Hashtag(hashtag_ref) => hashtag_ref.to_page_url(),
+        }
+    }
+
+    pub fn to_page_path(&self) -> PathBuf {
+        match self {
+            LinkRef::Feed(feed_ref) => feed_ref.to_page_path(),
+            LinkRef::Msg(msg_ref) => msg_ref.to_page_path(),
+            LinkRef::Blob(blob_ref) => blob_ref.to_page_path(),
+            LinkRef::Hashtag(hashtag_ref) => hashtag_ref.to_page_path(),
         }
     }
 }

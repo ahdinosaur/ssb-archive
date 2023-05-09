@@ -3,6 +3,7 @@ members = [
   "ssb-archive",
   "ssb-ref",
   "ssb-msg",
+  "ssb-threads",
   "ssb-db",
   "ssb-markdown",
   "ssb-pages"

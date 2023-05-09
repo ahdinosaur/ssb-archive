@@ -1940,6 +1940,8 @@ dependencies = [
  "ssb-markdown",
  "ssb-msg",
  "ssb-ref",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -1954,6 +1956,14 @@ dependencies = [
  "serde_with",
  "thiserror",
  "urlencoding",
+]
+
+[[package]]
+name = "ssb-threads"
+version = "0.1.0"
+dependencies = [
+ "ssb-msg",
+ "ssb-ref",
 ]
 
 [[package]]

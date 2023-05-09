@@ -102,3 +102,52 @@ async fn create_fork_index(connection: &mut SqliteConnection) -> Result<(), Erro
 
     Ok(())
 }
+
+/*
+
+get msgs in thread:
+
+SELECT log_seq
+FROM msgs
+JOIN msg_refs ON msg_refs.id = msgs.msg_ref_id
+JOIN posts ON posts.msg_ref_id = msgs.msg_ref_id
+JOIN msg_refs AS root_msg_refs ON root_msg_refs.id = posts.root_msg_ref_id
+WHERE
+    root_msg_refs.msg_ref = "%CiSwKkjT8cic9mdfwNRP5izrrS5RBgjOBtne7ddlHw0=.sha256"
+ORDER BY timestamp_asserted ASC
+
+
+get forks from thread:
+
+SELECT log_seq, msg_refs.msg_ref
+FROM msgs
+JOIN msg_refs ON msg_refs.id = msgs.msg_ref_id
+JOIN posts ON posts.msg_ref_id = msgs.msg_ref_id
+JOIN msg_refs AS fork_msg_refs ON fork_msg_refs.id = posts.fork_msg_ref_id
+WHERE
+    fork_msg_refs.msg_ref = "%CiSwKkjT8cic9mdfwNRP5izrrS5RBgjOBtne7ddlHw0=.sha256"
+ORDER BY timestamp_asserted ASC
+
+
+get authors in thread:
+
+SELECT
+    feed_refs.feed_ref,
+    JSON_EXTRACT(content, "$.name") as name,
+    JSON_EXTRACT(content, "$.image") as image
+FROM about_feeds
+JOIN feed_refs ON
+    about_feeds.link_to_feed_ref_id = feed_refs.id
+    AND about_feeds.link_from_feed_ref_id = feed_refs.id
+JOIN msgs ON msgs.feed_ref_id = feed_refs.id
+JOIN msg_refs ON msg_refs.id = msgs.msg_ref_id
+JOIN posts ON posts.msg_ref_id = msgs.msg_ref_id
+LEFT JOIN msg_refs AS root_msg_refs ON root_msg_refs.id = posts.root_msg_ref_id
+LEFT JOIN msg_refs AS fork_msg_refs ON fork_msg_refs.id = posts.fork_msg_ref_id
+WHERE
+    root_msg_refs.msg_ref = "%CiSwKkjT8cic9mdfwNRP5izrrS5RBgjOBtne7ddlHw0=.sha256"
+ORDER BY timestamp_asserted ASC
+
+
+
+*/
