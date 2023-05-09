@@ -8,11 +8,21 @@ pub async fn create_feed_links_tables(connection: &mut SqliteConnection) -> Resu
     trace!("Creating feed_links tables");
 
     query(
-        "CREATE TABLE IF NOT EXISTS feed_links (
-          id INTEGER PRIMARY KEY,
-          link_from_msg_ref_id INTEGER,
-          link_to_feed_ref_id INTEGER
-        )",
+        "
+        CREATE TABLE IF NOT EXISTS feed_links (
+            id INTEGER PRIMARY KEY,
+            link_from_msg_ref_id INTEGER NOT NULL,
+            link_to_feed_ref_id INTEGER NOT NULL,
+            FOREIGN KEY (link_from_msg_ref_id)
+                REFERENCES msg_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT,
+            FOREIGN KEY (link_to_feed_ref_id)
+                REFERENCES feed_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT
+        )
+        ",
     )
     .execute(connection)
     .await?;

@@ -1,7 +1,11 @@
 // use std::{thread::sleep, time::Duration};
 
+use std::{env::current_dir, io, path::Path};
+
+use progress_bar;
+use simple_home_dir::home_dir as get_home_dir;
+use ssb_db::{Database, Error as DatabaseError, SelectAllMsgsByFeedOptions};
 use ssb_markdown::render;
-use ssb_query::{sql::SqlViewError, SelectAllMsgsByFeedOptions, SsbQuery};
 use ssb_ref::{FeedRef, RefError};
 use thiserror::Error as ThisError;
 
@@ -17,55 +21,49 @@ async fn main() {
 
 #[derive(Debug, ThisError)]
 enum Error {
-    #[error("Query error: {0}")]
-    Query(#[from] SqlViewError),
+    #[error("Failed to get home dir")]
+    HomeDir,
+    #[error("Failed to get current dir: {0}")]
+    CurrentDir(#[source] io::Error),
+    #[error("Database error: {0}")]
+    Database(#[from] DatabaseError),
     #[error("Ref format error: {0}")]
     RefFormat(#[from] RefError),
 }
 
 async fn exec() -> Result<(), Error> {
-    let mut view = SsbQuery::new(
-        "/home/dinosaur/.ssb/flume/log.offset".into(),
-        "/home/dinosaur/repos/ahdinosaur/ssb-archive/output.sqlite3".into(),
-        Vec::new(),
-    )
-    .await?;
+    let cwd = current_dir().map_err(Error::CurrentDir)?;
+    let home_dir = get_home_dir().ok_or(Error::HomeDir)?;
+    let log_path = home_dir.join(Path::new(".ssb/flume/log.offset"));
+    let sql_path = cwd.join(Path::new("db.sqlite3"));
 
+    let mut db = Database::new(log_path, sql_path, Vec::new()).await?;
+
+    let log_latest = db.get_log_latest().await.unwrap_or(0);
+    progress_bar::init_progress_bar(log_latest as usize);
     loop {
-        let log_latest = view.get_log_latest().await;
-        let view_latest = view.get_view_latest().await;
-        match (log_latest, view_latest) {
-            (Some(log_offset), Some(view_offset)) => {
-                // HACK: handle cases where we aren't
-                //   able to process the last few messages.
-                //   (presumably because encrypted)
-                if log_offset < view_offset + 10_000 {
-                    break;
-                }
-                // otherwise would be:
-                // if log_offset == view_offset {
-                //     break;
-                // }
+        if let Some(sql_latest) = db.get_sql_latest().await? {
+            progress_bar::set_progress_bar_progression(sql_latest as usize);
+            if log_latest == sql_latest {
+                progress_bar::finalize_progress_bar();
+                break;
             }
-            _ => {}
         }
-        println!("log latest: {:?}", view.get_log_latest().await);
-        println!("view latest: {:?}", view.get_view_latest().await);
-        view.process(20_000).await?;
+        db.process(20_000).await?;
         // sleep(Duration::from_secs(1))
     }
 
     let feed_ref: FeedRef = "@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519"
         .to_owned()
         .try_into()?;
-    let max_seq = view.select_max_seq_by_feed(&feed_ref).await.unwrap();
+    let max_feed_seq = db.get_max_seq_by_feed(&feed_ref).await.unwrap();
 
-    let messages = view
-        .select_all_msgs_by_feed(SelectAllMsgsByFeedOptions {
+    let messages = db
+        .get_all_msgs_by_feed(SelectAllMsgsByFeedOptions {
             feed_ref: &feed_ref,
             content_type: "post",
             page_size: 10,
-            less_than_seq: max_seq + 1,
+            less_than_feed_seq: max_feed_seq + 1,
             is_decrypted: false,
         })
         .await?;

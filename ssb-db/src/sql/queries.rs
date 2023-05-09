@@ -1,7 +1,5 @@
 use crate::sql::*;
-use serde_json::Value;
-use sqlx::{query, Error, Row, SqliteConnection};
-use ssb_msg::Msg;
+use sqlx::{query, sqlite::SqliteRow, Error, Row, SqliteConnection};
 use ssb_ref::{FeedRef, MsgRef};
 
 pub async fn select_max_seq_by_feed<'a>(
@@ -11,9 +9,9 @@ pub async fn select_max_seq_by_feed<'a>(
     let max_seq: i64 = query(
         "
         SELECT
-          MAX(seq)
-        FROM msgs_raw
-        JOIN feed_refs ON feed_refs.id = msgs_raw.feed_ref_id
+          MAX(log_seq)
+        FROM msgs
+        JOIN feed_refs ON feed_refs.id = msgs.feed_ref_id
         WHERE
             feed_refs.feed_ref = ?
         LIMIT 1
@@ -31,61 +29,38 @@ pub struct SelectAllMsgsByFeedOptions<'a> {
     pub feed_ref: &'a FeedRef,
     pub content_type: &'a str,
     pub page_size: i64,
-    pub less_than_seq: i64,
+    pub less_than_feed_seq: i64,
     pub is_decrypted: bool,
 }
 
-pub async fn select_all_msgs_by_feed<'a>(
+pub async fn select_all_msg_log_seqs_by_feed<'a>(
     connection: &mut SqliteConnection,
     options: SelectAllMsgsByFeedOptions<'a>,
-) -> Result<Vec<Msg<Value>>, Error> {
-    let rows = query(
+) -> Result<Vec<Sequence>, Error> {
+    let msg_log_seqs = query(
         "
-        SELECT
-            seq,
-            msg_refs.msg_ref as msg_ref,
-            feed_refs.feed_ref as feed_ref,
-            received_time,
-            asserted_time,
-            content,
-            is_decrypted
-        FROM msgs_raw
-        JOIN msg_refs ON msg_refs.id = msgs_raw.msg_ref_id
-        JOIN feed_refs ON feed_refs.id = msgs_raw.feed_ref_id
+        SELECT log_seq
+        FROM msgs
+        JOIN feed_refs ON feed_refs.id = msgs.feed_ref_id
         WHERE
             feed_refs.feed_ref = ?
             AND content_type = ?
-            AND seq < ?
+            AND feed_seq < ?
             AND is_decrypted = ?
-        ORDER BY seq DESC
+        ORDER BY feed_seq DESC
         LIMIT ?
         ",
     )
     .bind(Into::<String>::into(options.feed_ref))
     .bind(options.content_type)
-    .bind(options.less_than_seq)
+    .bind(options.less_than_feed_seq)
     .bind(options.is_decrypted)
     .bind(options.page_size)
+    .map(|row: SqliteRow| row.get::<i64, _>(0) as Sequence)
     .fetch_all(connection)
     .await?;
 
-    let msgs = rows
-        .into_iter()
-        .map(|row| {
-            Ok(Msg {
-                key: MsgRef::from_string(row.get(1)).unwrap(),
-                value: MsgValue {
-                    author: FeedRef::from_string(row.get(2)).unwrap(),
-                    sequence: row.get::<i64, _>(0) as u64,
-                    timestamp_asserted: row.get(4),
-                    content: row.get(5),
-                },
-                timestamp_received: row.get(3),
-            })
-        })
-        .collect::<Result<Vec<Msg<Value>>, Error>>()?;
-
-    Ok(msgs)
+    Ok(msg_log_seqs)
 }
 // select all posts by a user
 //   - greater than seq
@@ -101,11 +76,11 @@ SELECT
   is_decrypted,
   root_msg_refs.msg_ref as root,
   fork_msg_refs.msg_ref as fork
-FROM msgs_raw
-JOIN msg_refs ON msg_refs.id=msgs_raw.msg_ref_id
-LEFT JOIN msg_refs AS root_msg_refs ON root_msg_refs.id=msgs_raw.root_id
-LEFT JOIN msg_refs AS fork_msg_refs ON fork_msg_refs.id=msgs_raw.fork_id
-JOIN feed_refs ON feed_refs.id=msgs_raw.feed_ref_id
+FROM msgs
+JOIN msg_refs ON msg_refs.id=msgs.msg_ref_id
+LEFT JOIN msg_refs AS root_msg_refs ON root_msg_refs.id=msgs.root_id
+LEFT JOIN msg_refs AS fork_msg_refs ON fork_msg_refs.id=msgs.fork_id
+JOIN feed_refs ON feed_refs.id=msgs.feed_ref_id
 WHERE
         feed_refs.feed_ref = '@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519'
         AND content_type = 'post'
@@ -150,12 +125,12 @@ pub async fn select_out_links_by_msg(
         SELECT
                 msg_links.link_to_msg_ref as id,
                 feed_refs.feed_ref as feed_ref,
-                msgs_raw.asserted_time as timestamp
+                msgs.asserted_time as timestamp
         FROM msg_links
         JOIN msg_refs ON msg_refs.msg_ref = msg_links.link_to_msg_ref
-        JOIN msgs_raw ON msgs_raw.msg_ref_id = msg_refs.id
-        JOIN feed_refs ON feed_refs.id = msgs_raw.feed_ref_id
-        LEFT JOIN msg_refs AS root_msg_refs ON root_msg_refs.id = msgs_raw.root_id
+        JOIN msgs ON msgs.msg_ref_id = msg_refs.id
+        JOIN feed_refs ON feed_refs.id = msgs.feed_ref_id
+        LEFT JOIN msg_refs AS root_msg_refs ON root_msg_refs.id = msgs.root_id
         WHERE link_from_msg_ref = ?1
         AND root_msg_refs.msg_ref = ?2
         AND content_type = ?3
@@ -203,12 +178,12 @@ pub async fn select_back_links_by_msg(
         SELECT
                 msg_links.link_from_msg_ref as id,
                 feed_refs.feed_ref as feed_ref,
-                msgs_raw.asserted_time as timestamp
+                msgs.asserted_time as timestamp
         FROM msg_links
         JOIN msg_refs ON msg_refs.msg_ref = msg_links.link_from_msg_ref
-        JOIN msgs_raw ON msgs_raw.msg_ref_id = msg_refs.id
-        JOIN feed_refs ON feed_refs.id = msgs_raw.feed_ref_id
-        LEFT JOIN msg_refs AS root_msg_refs ON root_msg_refs.id = msgs_raw.root_id
+        JOIN msgs ON msgs.msg_ref_id = msg_refs.id
+        JOIN feed_refs ON feed_refs.id = msgs.feed_ref_id
+        LEFT JOIN msg_refs AS root_msg_refs ON root_msg_refs.id = msgs.root_id
         WHERE link_to_msg_ref = ?1
         AND root_msg_refs.msg_ref = ?2
         AND content_type = ?3
@@ -249,20 +224,20 @@ pub fn friends_two_hops(connection: Connection) {
     //WHERE feed_refs.id IN (
     //SELECT
     //contact_feed_ref_id
-    //FROM contacts_raw
+    //FROM contacts
     //WHERE feed_ref_id == 1 AND state == 1
     //UNION
     //SELECT
-    //friend_contacts_raw.contact_feed_ref_id
-    //FROM contacts_raw
-    //join contacts_raw AS friend_contacts_raw ON friend_contacts_raw.feed_ref_id == contacts_raw.contact_feed_ref_id
-    //WHERE contacts_raw.feed_ref_id == 1
-    //AND contacts_raw.state == 1
-    //AND friend_contacts_raw.state == 1
+    //friend_contacts.contact_feed_ref_id
+    //FROM contacts
+    //join contacts AS friend_contacts ON friend_contacts.feed_ref_id == contacts.contact_feed_ref_id
+    //WHERE contacts.feed_ref_id == 1
+    //AND contacts.state == 1
+    //AND friend_contacts.state == 1
     //EXCEPT
     //SELECT
     //contact_feed_ref_id
-    //FROM contacts_raw
+    //FROM contacts
     //WHERE feed_ref_id == 1
     //AND state == -1)"
 }

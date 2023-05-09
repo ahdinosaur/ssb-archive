@@ -7,10 +7,12 @@ pub async fn create_migrations_tables(connection: &mut SqliteConnection) -> Resu
     trace!("Creating migrations tables");
 
     query(
-        "CREATE TABLE IF NOT EXISTS migrations (
-          id INTEGER PRIMARY KEY,
-          version INTEGER
-        )",
+        "
+        CREATE TABLE IF NOT EXISTS migrations (
+            id INTEGER PRIMARY KEY,
+            version INTEGER NOT NULL
+        )
+        ",
     )
     .execute(connection)
     .await?;
@@ -23,8 +25,6 @@ pub async fn is_db_up_to_date(connection: &mut SqliteConnection) -> Result<bool,
         .map(|row: SqliteRow| row.get(0))
         .fetch_optional(connection)
         .await;
-
-    println!("version: {:?}", result);
 
     match result {
         Ok(Some(version)) => Ok(version == MIGRATION_VERSION_NUMBER),

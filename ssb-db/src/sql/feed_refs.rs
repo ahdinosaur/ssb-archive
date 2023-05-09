@@ -28,10 +28,12 @@ pub async fn create_feed_refs_tables(connection: &mut SqliteConnection) -> Resul
     trace!("Creating feed_refs tables");
 
     query(
-        "CREATE TABLE IF NOT EXISTS feed_refs (
-          id INTEGER PRIMARY KEY,
-          feed_ref TEXT UNIQUE
-        )",
+        "
+        CREATE TABLE IF NOT EXISTS feed_refs (
+            id INTEGER PRIMARY KEY,
+            feed_ref TEXT UNIQUE NOT NULL
+        )
+        ",
     )
     .execute(connection)
     .await?;

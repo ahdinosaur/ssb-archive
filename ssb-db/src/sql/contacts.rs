@@ -9,13 +9,23 @@ pub async fn create_contacts_tables(connection: &mut SqliteConnection) -> Result
     trace!("Creating contacts tables");
 
     query(
-        "CREATE TABLE IF NOT EXISTS contacts_raw(
+        "
+        CREATE TABLE IF NOT EXISTS contacts(
             id INTEGER PRIMARY KEY,
-            feed_ref_id INTEGER,
-            contact_feed_ref_id INTEGER,
-            is_decrypted BOOLEAN,
-            state INTEGER
-        )",
+            feed_ref_id INTEGER NOT NULL,
+            contact_feed_ref_id INTEGER NOT NULL,
+            is_decrypted BOOLEAN NOT NULL,
+            state INTEGER NOT NULL,
+            FOREIGN KEY (feed_ref_id)
+                REFERENCES feed_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT,
+            FOREIGN KEY (contact_feed_ref_id)
+                REFERENCES feed_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT
+        )
+        ",
     )
     .execute(connection)
     .await?;
@@ -51,7 +61,7 @@ pub async fn insert_or_update_contacts(
     let contact_feed_ref_id = find_or_create_feed_ref(connection, &content.contact).await?;
 
     let row: Option<i64> = query(
-        "SELECT id FROM contacts_raw WHERE feed_ref_id = ? AND contact_feed_ref_id = ? AND is_decrypted = ?",
+        "SELECT id FROM contacts WHERE feed_ref_id = ? AND contact_feed_ref_id = ? AND is_decrypted = ?",
     )
         .bind(&feed_ref_id)
         .bind(&contact_feed_ref_id)
@@ -61,13 +71,13 @@ pub async fn insert_or_update_contacts(
         .await?;
 
     if let Some(id) = row {
-        query("UPDATE contacts_raw SET state = ? WHERE id = ?")
+        query("UPDATE contacts SET state = ? WHERE id = ?")
             .bind(state)
             .bind(id)
             .execute(connection)
             .await?;
     } else {
-        query("INSERT INTO contacts_raw (feed_ref_id, contact_feed_ref_id, is_decrypted, state) VALUES (?, ?, ?, ?)")
+        query("INSERT INTO contacts (feed_ref_id, contact_feed_ref_id, is_decrypted, state) VALUES (?, ?, ?, ?)")
             .bind(feed_ref_id)
             .bind(contact_feed_ref_id)
             .bind(is_decrypted)
@@ -87,13 +97,13 @@ async fn create_contacts_feed_ref_id_state_index(conn: &mut SqliteConnection) ->
     trace!("Creating contacts feed_ref_id index");
 
     query(
-        "CREATE INDEX IF NOT EXISTS contacts_contact_feed_ref_id_state_index on contacts_raw (contact_feed_ref_id)",
+        "CREATE INDEX IF NOT EXISTS contacts_contact_feed_ref_id_state_index on contacts (contact_feed_ref_id)",
     )
     .execute(&mut *conn)
     .await?;
 
     query(
-        "CREATE INDEX IF NOT EXISTS contacts_feed_ref_id_state_index on contacts_raw (feed_ref_id, state)",
+        "CREATE INDEX IF NOT EXISTS contacts_feed_ref_id_state_index on contacts (feed_ref_id, state)",
     )
     .execute(&mut *conn)
     .await?;
