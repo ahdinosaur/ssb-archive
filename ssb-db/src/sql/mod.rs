@@ -13,7 +13,6 @@ use std::str::FromStr;
 mod abouts;
 mod blob_links;
 mod blob_refs;
-mod branches;
 mod contacts;
 mod feed_links;
 mod feed_refs;
@@ -21,13 +20,13 @@ mod migrations;
 mod msg_links;
 mod msg_refs;
 mod msgs;
+mod post_branches;
 mod posts;
 mod queries;
 mod votes;
 use self::abouts::*;
 use self::blob_links::*;
 use self::blob_refs::*;
-use self::branches::*;
 use self::contacts::*;
 use self::feed_links::*;
 use self::feed_refs::*;
@@ -38,6 +37,7 @@ pub(crate) use self::msg_refs::find_or_create_msg_ref;
 use self::msg_refs::*;
 use self::msgs::*;
 pub(crate) use self::msgs::{get_msg_log_seq, insert_msg};
+use self::post_branches::*;
 use self::posts::*;
 pub use self::queries::SelectAllMsgsByFeedOptions;
 pub(crate) use self::queries::*;
@@ -108,7 +108,7 @@ pub async fn insert_content(
 
             insert_post(connection, &msg, &post, msg_ref_id).await?;
             if let Some(branch) = &post.branch {
-                insert_branches(connection, branch.as_slice(), msg_ref_id).await?;
+                insert_post_branches(connection, branch.as_slice(), msg_ref_id).await?;
             }
         }
         MsgContent::Contact(contact) => {
@@ -159,10 +159,10 @@ async fn create_tables(connection: &mut SqliteConnection) -> Result<(), SqlError
     create_blob_refs_tables(connection).await?;
     create_blob_links_tables(connection).await?;
     create_contacts_tables(connection).await?;
-    create_branches_tables(connection).await?;
     create_abouts_tables(connection).await?;
     create_votes_tables(connection).await?;
     create_posts_tables(connection).await?;
+    create_post_branches_tables(connection).await?;
 
     Ok(())
 }
@@ -175,10 +175,10 @@ async fn create_indices(connection: &mut SqliteConnection) -> Result<(), SqlErro
     create_feed_links_indices(connection).await?;
     create_blob_links_indices(connection).await?;
     create_contacts_indices(connection).await?;
-    create_branches_indices(connection).await?;
     create_abouts_indices(connection).await?;
     create_votes_indices(connection).await?;
     create_posts_indices(connection).await?;
+    create_post_branches_indices(connection).await?;
     Ok(())
 }
 
