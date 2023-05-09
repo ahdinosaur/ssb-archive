@@ -1,18 +1,14 @@
-use base64::engine::{general_purpose::STANDARD as b64, Engine};
 use flumedb::flume_view::Sequence;
-use log::{info, trace};
-use private_box::Keypair;
+use log::trace;
 use serde_derive::{Deserialize, Serialize};
-use serde_json::{from_value, Error as JsonError, Value};
+use serde_json::Value;
 use sqlx::{
     query,
     sqlite::{SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqliteRow},
-    ConnectOptions, Connection, Error as SqlError, Row,
+    ConnectOptions, Error as SqlError, Row,
 };
 use ssb_msg::{BlobLink, Link, Msg, MsgContent};
-use ssb_ref::RefError;
 use std::str::FromStr;
-use thiserror::Error as ThisError;
 
 mod abouts;
 mod blob_links;
@@ -35,34 +31,19 @@ use self::branches::*;
 use self::contacts::*;
 use self::feed_links::*;
 use self::feed_refs::*;
+pub(crate) use self::migrations::is_db_up_to_date;
 use self::migrations::*;
 use self::msg_links::*;
+pub(crate) use self::msg_refs::find_or_create_msg_ref;
 use self::msg_refs::*;
-pub(crate) use self::msgs::get_msg_log_seq;
 use self::msgs::*;
+pub(crate) use self::msgs::{get_msg_log_seq, insert_msg};
 use self::posts::*;
 pub use self::queries::SelectAllMsgsByFeedOptions;
 pub(crate) use self::queries::*;
 use self::votes::*;
 
-#[derive(Debug, ThisError)]
-pub enum SqlViewError {
-    #[error("Db failed integrity check")]
-    DbFailedIntegrityCheck {},
-    #[error("Sql error: {0}")]
-    Sql(#[from] SqlError),
-    #[error("Json error: {0}")]
-    Json(#[from] JsonError),
-    #[error("Ref format error: {0}")]
-    RefFormat(#[from] RefError),
-}
-
-pub struct SqlView {
-    pub connection: SqliteConnection,
-    secret_keys: Vec<Keypair>,
-}
-
-async fn create_connection(path: &str) -> Result<SqliteConnection, SqlError> {
+pub async fn create_connection(path: &str) -> Result<SqliteConnection, SqlError> {
     SqliteConnectOptions::from_str(path)?
         .journal_mode(SqliteJournalMode::Wal)
         .create_if_missing(true)
@@ -70,131 +51,41 @@ async fn create_connection(path: &str) -> Result<SqliteConnection, SqlError> {
         .await
 }
 
-impl SqlView {
-    pub async fn new(path: &str, secret_keys: Vec<Keypair>) -> Result<SqlView, SqlViewError> {
-        let mut connection = create_connection(path).await?;
+pub async fn setup_new_db(connection: &mut SqliteConnection) -> Result<(), SqlError> {
+    create_tables(connection).await?;
+    create_indices(connection).await?;
 
-        if let Ok(false) = is_db_up_to_date(&mut connection).await {
-            info!("sqlite db is out of date. Deleting db and it will be rebuilt.");
-            std::fs::remove_file(path).unwrap();
+    set_db_version(connection).await?;
 
-            connection = create_connection(path).await?;
+    Ok(())
+}
 
-            create_tables(&mut connection).await?;
-            create_indices(&mut connection).await?;
+pub async fn setup_db(connection: &mut SqliteConnection) -> Result<(), SqlError> {
+    set_pragmas(connection).await?;
 
-            set_db_version(&mut connection).await?;
-        }
+    Ok(())
+}
 
-        set_pragmas(&mut connection).await?;
+pub async fn check_db_integrity(connection: &mut SqliteConnection) -> Result<bool, SqlError> {
+    let res: String = query("PRAGMA integrity_check")
+        .map(|row: SqliteRow| -> String { row.get(0) })
+        .fetch_one(connection)
+        .await?;
 
-        Ok(SqlView {
-            connection,
-            secret_keys,
-        })
-    }
-
-    pub async fn append_batch(
-        &mut self,
-        items: &[(Sequence, Vec<u8>)],
-    ) -> Result<(), SqlViewError> {
-        trace!("Start batch append");
-
-        let secret_keys = self.secret_keys.to_owned();
-        let items_cloned = items.to_owned();
-        self.connection
-            .transaction::<'_, _, _, SqlViewError>(move |mut conn| {
-                Box::pin(async move {
-                    for item in items_cloned {
-                        append_item(&mut conn, &secret_keys, &item.0, &item.1).await?;
-                    }
-                    Ok(())
-                })
-            })
-            .await?;
-
-        Ok(())
-    }
-
-    pub async fn check_db_integrity(&mut self) -> Result<(), SqlViewError> {
-        let res: String = query("PRAGMA integrity_check")
-            .map(|row: SqliteRow| -> String { row.get(0) })
-            .fetch_one(&mut self.connection)
-            .await?;
-
-        if res == "ok" {
-            Ok(())
-        } else {
-            Err(SqlViewError::DbFailedIntegrityCheck {}.into())
-        }
-    }
-
-    pub async fn get_latest(&mut self) -> Result<Option<Sequence>, SqlViewError> {
-        let res: Option<i64> = query("SELECT MAX(log_seq) FROM msgs")
-            .map(|row: SqliteRow| row.get(0))
-            .fetch_optional(&mut self.connection)
-            .await?;
-
-        trace!("got latest seq from db: {:?}", res);
-
-        Ok(res.map(|v| v as Sequence))
+    if res == "ok" {
+        Ok(true)
+    } else {
+        Ok(false)
     }
 }
 
-fn attempt_decryption(mut msg: Msg<Value>, secret_keys: &[Keypair]) -> (bool, Msg<Value>) {
-    let mut is_decrypted = false;
-
-    if let Value::String(ref content) = msg.value.content {
-        let string = content.trim_end_matches(".box");
-
-        let decoded = b64.decode(string);
-        if let Ok(bytes) = decoded {
-            for secret_key in secret_keys {
-                if let Some(decrypted) = private_box::decrypt(&bytes, secret_key) {
-                    is_decrypted = true;
-                    if let Ok(new_content) = serde_json::from_slice(&decrypted) {
-                        msg.value.content = new_content;
-                    }
-                    break;
-                }
-            }
-        }
-    };
-
-    (is_decrypted, msg)
-}
-
-async fn append_item(
+pub async fn insert_content(
     connection: &mut SqliteConnection,
-    secret_keys: &[Keypair],
-    log_seq: &Sequence,
-    item: &[u8],
-) -> Result<(), SqlViewError> {
-    let msg: Msg<Value> = serde_json::from_slice(item).unwrap();
-
-    let (is_decrypted, msg) = attempt_decryption(msg, secret_keys);
-
-    let msg_ref_id = find_or_create_msg_ref(connection, &msg.key).await?;
-
-    if !msg.value.content.is_object() {
-        // early return if content is not object
-        // eprintln!("No content: {:?}", msg.value.content);
-        return Ok(());
-    }
-
-    let content_result: Result<MsgContent, JsonError> = from_value(msg.value.content.clone());
-
-    let content = match content_result {
-        Ok(content) => content,
-        Err(error) => {
-            // early return if content is misformatted
-            // eprintln!("Error: {}", error);
-            // eprintln!("-> Content: {:?}", msg.value.content);
-            // return Err(error.into());
-            return Ok(());
-        }
-    };
-
+    msg: &Msg<Value>,
+    content: &MsgContent,
+    msg_ref_id: i64,
+    is_decrypted: bool,
+) -> Result<(), SqlError> {
     match content {
         MsgContent::Post(post) => {
             if let Some(links) = &post.mentions {
@@ -216,22 +107,18 @@ async fn append_item(
             }
 
             insert_post(connection, &msg, &post, msg_ref_id).await?;
-            if let Some(branch) = post.branch {
+            if let Some(branch) = &post.branch {
                 insert_branches(connection, branch.as_slice(), msg_ref_id).await?;
             }
-            insert_msg(connection, &msg, log_seq, msg_ref_id, is_decrypted).await?;
         }
         MsgContent::Contact(contact) => {
             insert_or_update_contacts(connection, &msg, &contact, msg_ref_id, is_decrypted).await?;
-            insert_msg(connection, &msg, log_seq, msg_ref_id, is_decrypted).await?;
         }
         MsgContent::Vote(vote) => {
             insert_or_update_votes(connection, &msg, &vote).await?;
-            insert_msg(connection, &msg, log_seq, msg_ref_id, is_decrypted).await?;
         }
         MsgContent::About(about) => {
             insert_abouts(connection, &msg, &about).await?;
-            insert_msg(connection, &msg, log_seq, msg_ref_id, is_decrypted).await?;
         }
         MsgContent::Unknown => {
             // println!("Unknown content: {:?}", msg.value.content);
@@ -239,6 +126,17 @@ async fn append_item(
     }
 
     Ok(())
+}
+
+pub async fn get_latest(connection: &mut SqliteConnection) -> Result<Option<Sequence>, SqlError> {
+    let res: Option<i64> = query("SELECT MAX(log_seq) FROM msgs")
+        .map(|row: SqliteRow| row.get(0))
+        .fetch_optional(connection)
+        .await?;
+
+    trace!("got latest seq from db: {:?}", res);
+
+    Ok(res.map(|v| v as Sequence))
 }
 
 async fn set_pragmas(connection: &mut SqliteConnection) -> Result<(), SqlError> {

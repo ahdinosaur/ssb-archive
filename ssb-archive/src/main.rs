@@ -1,7 +1,7 @@
 // use std::{thread::sleep, time::Duration};
 
+use ssb_db::{Database, Error as DatabaseError, SelectAllMsgsByFeedOptions};
 use ssb_markdown::render;
-use ssb_query::{QueryError, SelectAllMsgsByFeedOptions, SsbQuery};
 use ssb_ref::{FeedRef, RefError};
 use thiserror::Error as ThisError;
 
@@ -17,14 +17,14 @@ async fn main() {
 
 #[derive(Debug, ThisError)]
 enum Error {
-    #[error("Query error: {0}")]
-    Query(#[from] QueryError),
+    #[error("Database error: {0}")]
+    Database(#[from] DatabaseError),
     #[error("Ref format error: {0}")]
     RefFormat(#[from] RefError),
 }
 
 async fn exec() -> Result<(), Error> {
-    let mut view = SsbQuery::new(
+    let mut db = Database::new(
         "/home/dinosaur/.ssb/flume/log.offset".into(),
         "/home/dinosaur/repos/ahdinosaur/ssb-archive/output.sqlite3".into(),
         Vec::new(),
@@ -32,35 +32,25 @@ async fn exec() -> Result<(), Error> {
     .await?;
 
     loop {
-        let log_latest = view.get_log_latest().await;
-        let view_latest = view.get_view_latest().await;
-        match (log_latest, view_latest) {
-            (Some(log_offset), Some(view_offset)) => {
-                // HACK: handle cases where we aren't
-                //   able to process the last few messages.
-                //   (presumably because encrypted)
-                if log_offset < view_offset + 10_000 {
-                    break;
-                }
-                // otherwise would be:
-                // if log_offset == view_offset {
-                //     break;
-                // }
+        let log_latest = db.get_log_latest().await;
+        let sql_latest = db.get_sql_latest().await?;
+        if let (Some(log_offset), Some(sql_offset)) = (log_latest, sql_latest) {
+            if log_offset == sql_offset {
+                break;
             }
-            _ => {}
         }
-        println!("log latest: {:?}", view.get_log_latest().await);
-        println!("view latest: {:?}", view.get_view_latest().await);
-        view.process(20_000).await?;
+        println!("log latest: {:?}", log_latest);
+        println!("sql latest: {:?}", sql_latest);
+        db.process(20_000).await?;
         // sleep(Duration::from_secs(1))
     }
 
     let feed_ref: FeedRef = "@6ilZq3kN0F+dXFHAPjAwMm87JEb/VdB+LC9eIMW3sa0=.ed25519"
         .to_owned()
         .try_into()?;
-    let max_feed_seq = view.get_max_seq_by_feed(&feed_ref).await.unwrap();
+    let max_feed_seq = db.get_max_seq_by_feed(&feed_ref).await.unwrap();
 
-    let messages = view
+    let messages = db
         .get_all_msgs_by_feed(SelectAllMsgsByFeedOptions {
             feed_ref: &feed_ref,
             content_type: "post",

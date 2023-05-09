@@ -11,6 +11,7 @@ pub async fn insert_msg(
     msg: &Msg<Value>,
     log_seq: &Sequence,
     msg_ref_id: i64,
+    is_encrypted: bool,
     is_decrypted: bool,
 ) -> Result<(), Error> {
     trace!("find or create feed_ref");
@@ -26,8 +27,9 @@ pub async fn insert_msg(
             timestamp_asserted,
             feed_ref_id,
             content_type,
+            is_encrypted,
             is_decrypted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(msg_ref_id)
     .bind(*log_seq as i64)
@@ -35,7 +37,8 @@ pub async fn insert_msg(
     .bind(msg.timestamp_received)
     .bind(msg.value.timestamp_asserted)
     .bind(feed_ref_id)
-    .bind(msg.value.content["type"].as_str())
+    .bind(msg.value.content.get("type").map(|v| v.as_str()))
+    .bind(is_encrypted)
     .bind(is_decrypted)
     .execute(connection)
     .await?;
@@ -75,6 +78,7 @@ pub async fn create_msgs_tables(connection: &mut SqliteConnection) -> Result<(),
           timestamp_received REAL,
           timestamp_asserted REAL,
           content_type TEXT,
+          is_encrypted BOOLEAN,
           is_decrypted BOOLEAN
         )",
     )

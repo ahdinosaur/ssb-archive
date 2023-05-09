@@ -1,5 +1,5 @@
 [package]
-name = "ssb-query"
+name = "ssb-db"
 version = "0.1.0"
 edition = "2021"
 authors = ["Piet Geursen <pietgeursen@gmail.com>", "Michael Williams <hello@mikey.nz>"]

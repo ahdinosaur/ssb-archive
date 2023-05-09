@@ -1,6 +1,6 @@
 use log::trace;
 use serde_json::Value;
-use sqlx::{query, sqlite::SqliteRow, Error, Row, SqliteConnection};
+use sqlx::{query, Error, SqliteConnection};
 use ssb_msg::{Msg, PostContent};
 
 use crate::sql::*;

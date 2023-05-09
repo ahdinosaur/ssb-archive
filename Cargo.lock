@@ -1833,9 +1833,9 @@ name = "ssb-archive"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "ssb-db",
  "ssb-markdown",
  "ssb-msg",
- "ssb-query",
  "ssb-ref",
  "thiserror",
  "tokio",
@@ -1858,6 +1858,25 @@ dependencies = [
  "xsalsa20poly1305",
  "zerocopy",
  "zeroize",
+]
+
+[[package]]
+name = "ssb-db"
+version = "0.1.0"
+dependencies = [
+ "base64 0.21.0",
+ "flumedb",
+ "itertools",
+ "log",
+ "private-box",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "sqlx",
+ "ssb-msg",
+ "ssb-ref",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -1897,29 +1916,10 @@ version = "0.1.0"
 dependencies = [
  "axohtml",
  "serde_json",
+ "ssb-db",
  "ssb-markdown",
  "ssb-msg",
- "ssb-query",
  "ssb-ref",
-]
-
-[[package]]
-name = "ssb-query"
-version = "0.1.0"
-dependencies = [
- "base64 0.21.0",
- "flumedb",
- "itertools",
- "log",
- "private-box",
- "serde",
- "serde_derive",
- "serde_json",
- "sqlx",
- "ssb-msg",
- "ssb-ref",
- "thiserror",
- "tokio",
 ]
 
 [[package]]
