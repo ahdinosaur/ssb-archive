@@ -9,13 +9,23 @@ pub async fn create_votes_tables(connection: &mut SqliteConnection) -> Result<()
     trace!("Creating votes tables");
 
     query(
-        "CREATE TABLE IF NOT EXISTS votes (
-          id INTEGER PRIMARY KEY,
-          feed_seq INTEGER,
-          link_from_feed_ref_id INTEGER,
-          link_to_msg_ref_id INTEGER,
-          value INTEGER
-        )",
+        "
+        CREATE TABLE IF NOT EXISTS votes (
+            id INTEGER PRIMARY KEY,
+            feed_seq INTEGER NOT NULL,
+            link_from_feed_ref_id INTEGER NOT NULL,
+            link_to_msg_ref_id INTEGER NOT NULL,
+            value INTEGER NOT NULL,
+            FOREIGN KEY (link_from_feed_ref_id)
+                REFERENCES feed_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT,
+            FOREIGN KEY (link_to_msg_ref_id)
+                REFERENCES msg_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT
+        )
+        ",
     )
     .execute(connection)
     .await?;

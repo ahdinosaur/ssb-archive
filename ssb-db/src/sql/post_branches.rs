@@ -25,11 +25,21 @@ pub async fn create_post_branches_tables(connection: &mut SqliteConnection) -> R
     trace!("Creating post_branches tables");
 
     query(
-        "CREATE TABLE IF NOT EXISTS post_branches (
-          id INTEGER PRIMARY KEY,
-          link_from_msg_ref_id INTEGER,
-          link_to_msg_ref_id INTEGER
-        )",
+        "
+        CREATE TABLE IF NOT EXISTS post_branches (
+            id INTEGER PRIMARY KEY,
+            link_from_msg_ref_id INTEGER NOT NULL,
+            link_to_msg_ref_id INTEGER NOT NULL,
+            FOREIGN KEY (link_from_msg_ref_id)
+                REFERENCES msg_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT,
+            FOREIGN KEY (link_to_msg_ref_id)
+                REFERENCES msg_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT
+        )
+        ",
     )
     .execute(connection)
     .await?;

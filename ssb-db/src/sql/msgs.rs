@@ -70,17 +70,27 @@ pub async fn get_msg_log_seq(
 pub async fn create_msgs_tables(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating msgs tables");
     query(
-        "CREATE TABLE IF NOT EXISTS msgs (
-          msg_ref_id INTEGER UNIQUE, 
-          log_seq INTEGER PRIMARY KEY,
-          feed_ref_id INTEGER,
-          feed_seq INTEGER,
-          timestamp_received REAL,
-          timestamp_asserted REAL,
-          content_type TEXT,
-          is_encrypted BOOLEAN,
-          is_decrypted BOOLEAN
-        )",
+        "
+        CREATE TABLE IF NOT EXISTS msgs (
+            log_seq INTEGER PRIMARY KEY,
+            msg_ref_id INTEGER UNIQUE NOT NULL, 
+            feed_ref_id INTEGER NOT NULL,
+            feed_seq INTEGER NOT NULL,
+            timestamp_received REAL NOT NULL,
+            timestamp_asserted REAL NOT NULL,
+            content_type TEXT,
+            is_encrypted BOOLEAN NOT NULL,
+            is_decrypted BOOLEAN NOT NULL,
+            FOREIGN KEY (msg_ref_id)
+                REFERENCES msg_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT,
+            FOREIGN KEY (feed_ref_id)
+                REFERENCES feed_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT
+        )
+        ",
     )
     .execute(connection)
     .await?;

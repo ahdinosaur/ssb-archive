@@ -10,25 +10,45 @@ pub async fn create_abouts_tables(connection: &mut SqliteConnection) -> Result<(
     trace!("Creating abouts tables");
 
     query(
-        "CREATE TABLE IF NOT EXISTS about_feeds (
-          id INTEGER PRIMARY KEY,
-          feed_seq INTEGER,
-          link_from_feed_ref_id INTEGER,
-          link_to_feed_ref_id INTEGER,
-          content JSON
-        )",
+        "
+        CREATE TABLE IF NOT EXISTS about_feeds (
+            id INTEGER PRIMARY KEY,
+            feed_seq INTEGER NOT NULL,
+            link_from_feed_ref_id INTEGER NOT NULL,
+            link_to_feed_ref_id INTEGER NOT NULL,
+            content JSON NOT NULL,
+            FOREIGN KEY (link_from_feed_ref_id)
+                REFERENCES feed_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT,
+            FOREIGN KEY (link_to_feed_ref_id)
+                REFERENCES feed_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT
+        )
+        ",
     )
     .execute(&mut *connection)
     .await?;
 
     query(
-        "CREATE TABLE IF NOT EXISTS about_msgs (
-          id INTEGER PRIMARY KEY,
-          feed_seq INTEGER,
-          link_from_feed_ref_id INTEGER,
-          link_to_msg_ref_id INTEGER,
-          content JSON
-        )",
+        "
+        CREATE TABLE IF NOT EXISTS about_msgs (
+            id INTEGER PRIMARY KEY,
+            feed_seq INTEGER NOT NULL,
+            link_from_feed_ref_id INTEGER NOT NULL,
+            link_to_msg_ref_id INTEGER NOT NULL,
+            content JSON NOT NULL,
+            FOREIGN KEY (link_from_feed_ref_id)
+                REFERENCES feed_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT,
+            FOREIGN KEY (link_to_msg_ref_id)
+                REFERENCES msg_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT
+        )
+        ",
     )
     .execute(&mut *connection)
     .await?;

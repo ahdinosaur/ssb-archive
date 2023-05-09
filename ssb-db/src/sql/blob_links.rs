@@ -8,11 +8,21 @@ pub async fn create_blob_links_tables(connection: &mut SqliteConnection) -> Resu
     trace!("Creating blob_links tables");
 
     query(
-        "CREATE TABLE IF NOT EXISTS blob_links (
-          id INTEGER PRIMARY KEY,
-          link_from_msg_ref_id INTEGER,
-          link_to_blob_ref_id INTEGER
-        )",
+        "
+        CREATE TABLE IF NOT EXISTS blob_links (
+            id INTEGER PRIMARY KEY,
+            link_from_msg_ref_id INTEGER NOT NULL,
+            link_to_blob_ref_id INTEGER NOT NULL,
+            FOREIGN KEY (link_from_msg_ref_id)
+                REFERENCES msg_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT,
+            FOREIGN KEY (link_to_blob_ref_id)
+                REFERENCES blob_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT
+        )
+        ",
     )
     .execute(connection)
     .await?;

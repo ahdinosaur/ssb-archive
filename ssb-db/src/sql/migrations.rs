@@ -7,10 +7,12 @@ pub async fn create_migrations_tables(connection: &mut SqliteConnection) -> Resu
     trace!("Creating migrations tables");
 
     query(
-        "CREATE TABLE IF NOT EXISTS migrations (
-          id INTEGER PRIMARY KEY,
-          version INTEGER
-        )",
+        "
+        CREATE TABLE IF NOT EXISTS migrations (
+            id INTEGER PRIMARY KEY,
+            version INTEGER NOT NULL
+        )
+        ",
     )
     .execute(connection)
     .await?;

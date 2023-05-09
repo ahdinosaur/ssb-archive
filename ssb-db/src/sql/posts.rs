@@ -44,11 +44,21 @@ pub async fn insert_post(
 pub async fn create_posts_tables(connection: &mut SqliteConnection) -> Result<(), Error> {
     trace!("Creating posts tables");
     query(
-        "CREATE TABLE IF NOT EXISTS posts (
-          msg_ref_id INTEGER UNIQUE, 
-          root_msg_ref_id INTEGER,
-          fork_msg_ref_id INTEGER
-        )",
+        "
+        CREATE TABLE IF NOT EXISTS posts (
+            msg_ref_id INTEGER UNIQUE, 
+            root_msg_ref_id INTEGER,
+            fork_msg_ref_id INTEGER,
+            FOREIGN KEY (root_msg_ref_id)
+                REFERENCES msg_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT,
+            FOREIGN KEY (fork_msg_ref_id)
+                REFERENCES msg_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT
+        )
+        ",
     )
     .execute(connection)
     .await?;

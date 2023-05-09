@@ -9,13 +9,23 @@ pub async fn create_contacts_tables(connection: &mut SqliteConnection) -> Result
     trace!("Creating contacts tables");
 
     query(
-        "CREATE TABLE IF NOT EXISTS contacts(
+        "
+        CREATE TABLE IF NOT EXISTS contacts(
             id INTEGER PRIMARY KEY,
-            feed_ref_id INTEGER,
-            contact_feed_ref_id INTEGER,
-            is_decrypted BOOLEAN,
-            state INTEGER
-        )",
+            feed_ref_id INTEGER NOT NULL,
+            contact_feed_ref_id INTEGER NOT NULL,
+            is_decrypted BOOLEAN NOT NULL,
+            state INTEGER NOT NULL,
+            FOREIGN KEY (feed_ref_id)
+                REFERENCES feed_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT,
+            FOREIGN KEY (contact_feed_ref_id)
+                REFERENCES feed_refs (id)
+                ON UPDATE RESTRICT
+                ON DELETE RESTRICT
+        )
+        ",
     )
     .execute(connection)
     .await?;

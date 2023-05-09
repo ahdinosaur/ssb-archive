@@ -28,10 +28,12 @@ pub async fn create_blob_refs_tables(connection: &mut SqliteConnection) -> Resul
     trace!("Creating blob_refs tables");
 
     query(
-        "CREATE TABLE IF NOT EXISTS blob_refs (
-          id INTEGER PRIMARY KEY,
-          blob_ref TEXT UNIQUE
-        )",
+        "
+        CREATE TABLE IF NOT EXISTS blob_refs (
+            id INTEGER PRIMARY KEY,
+            blob_ref TEXT UNIQUE NOT NULL
+        )
+        ",
     )
     .execute(connection)
     .await?;

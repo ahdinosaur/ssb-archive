@@ -28,10 +28,12 @@ pub async fn create_msg_refs_tables(connection: &mut SqliteConnection) -> Result
     trace!("Creating msg_refs tables");
 
     query(
-        "CREATE TABLE IF NOT EXISTS msg_refs (
-          id INTEGER PRIMARY KEY,
-          msg_ref TEXT UNIQUE
-        )",
+        "
+        CREATE TABLE IF NOT EXISTS msg_refs (
+            id INTEGER PRIMARY KEY,
+            msg_ref TEXT UNIQUE NOT NULL
+        )
+        ",
     )
     .execute(connection)
     .await?;

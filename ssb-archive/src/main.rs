@@ -26,7 +26,7 @@ enum Error {
 async fn exec() -> Result<(), Error> {
     let mut db = Database::new(
         "/home/dinosaur/.ssb/flume/log.offset".into(),
-        "/home/dinosaur/repos/ahdinosaur/ssb-archive/output.sqlite3".into(),
+        "/home/dinosaur/repos/ahdinosaur/ssb-archive/db.sqlite3".into(),
         Vec::new(),
     )
     .await?;
