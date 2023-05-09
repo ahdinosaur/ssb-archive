@@ -156,42 +156,56 @@ pub async fn select_out_links_by_msg(
     Ok(out_links)
 }
 
+/*
+
+
+
+
+*/
+
 pub async fn select_back_links_by_msg(
     connection: &mut SqliteConnection,
     id: &str,
 ) -> Result<Vec<Link>, Error> {
     /*
-        SELECT
-            links.link_from_msg_ref as id,
-            msgs.feed_ref as feed_ref,
-            msgs.received_time as timestamp
-        FROM links
-        JOIN msgs ON msgs.msg_ref = links.link_from_msg_ref
-        WHERE link_to_msg_ref = ?
-        AND NOT root = ?
-        AND NOT content_type = 'about'
-        AND NOT content_type = 'vote'
-        AND NOT content_type = 'tag'
-    */
+                SELECT
+                    links.link_from_msg_ref as id,
+                    msgs.feed_ref as feed_ref,
+                    msgs.received_time as timestamp
+                FROM links
+                JOIN msgs ON msgs.msg_ref = links.link_from_msg_ref
+                WHERE link_to_msg_ref = ?
+                AND NOT root = ?
+                AND NOT content_type = 'about'
+                AND NOT content_type = 'vote'
+                AND NOT content_type = 'tag'
+
+
+    SELECT
+        from_msg_refs.msg_ref,
+        msgs.log_seq
+    FROM msg_links
+    JOIN msg_refs AS from_msg_refs ON from_msg_refs.id = msg_links.link_from_msg_ref_id
+    JOIN msg_refs AS to_msg_refs ON to_msg_refs.id = msg_links.link_to_msg_ref_id
+    JOIN msgs ON msgs.msg_ref_id = from_msg_refs.id
+    WHERE to_msg_refs.msg_ref = "%zv56AbEcR1+XKcOF3E7J+HNoKrxsd+0MQ/eVPQanfb8=.sha256"
+
+
+
+            */
     let rows = query(
         "
-        SELECT
-                msg_links.link_from_msg_ref as id,
-                feed_refs.feed_ref as feed_ref,
-                msgs.asserted_time as timestamp
-        FROM msg_links
-        JOIN msg_refs ON msg_refs.msg_ref = msg_links.link_from_msg_ref
-        JOIN msgs ON msgs.msg_ref_id = msg_refs.id
-        JOIN feed_refs ON feed_refs.id = msgs.feed_ref_id
-        LEFT JOIN msg_refs AS root_msg_refs ON root_msg_refs.id = msgs.root_id
-        WHERE link_to_msg_ref = ?1
-        AND root_msg_refs.msg_ref = ?2
-        AND content_type = ?3
+            SELECT
+                    from_msg_refs.msg_ref,
+                    msgs.log_seq
+            FROM msg_links
+            JOIN msg_refs AS from_msg_refs ON from_msg_refs.id = msg_links.link_from_msg_ref_id
+            JOIN msg_refs AS to_msg_refs ON to_msg_refs.id = msg_links.link_to_msg_ref_id
+            JOIN msgs ON msgs.msg_ref_id = from_msg_refs.id
+            WHERE to_msg_refs.msg_ref = ?
 ",
     )
     .bind(id)
-    .bind(id)
-    .bind("post")
     .fetch_all(connection)
     .await?;
 

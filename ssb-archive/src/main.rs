@@ -35,7 +35,7 @@ async fn exec() -> Result<(), Error> {
     let cwd = current_dir().map_err(Error::CurrentDir)?;
     let home_dir = get_home_dir().ok_or(Error::HomeDir)?;
     let log_path = home_dir.join(Path::new(".ssb/flume/log.offset"));
-    let sql_path = cwd.join(Path::new("db.sqlite3"));
+    let sql_path = cwd.join(Path::new("output/db.sqlite3"));
 
     let mut db = Database::new(log_path, sql_path, Vec::new()).await?;
 

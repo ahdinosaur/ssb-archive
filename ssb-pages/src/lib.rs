@@ -17,6 +17,7 @@ pub struct Config {
     base_dir: PathBuf,
 }
 
+/*
 pub async fn write_thread_html(
     config: &Config,
     thread: &Thread<Value>,
@@ -89,11 +90,4 @@ pub fn render_post(msg: &Msg<Value>, content: &PostContent) -> DOMTree<String> {
         </div>
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {}
-}
+*/

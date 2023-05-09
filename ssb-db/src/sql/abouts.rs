@@ -1,5 +1,5 @@
 use log::trace;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sqlx::{query, Error, SqliteConnection};
 use ssb_msg::{AboutContent, Msg};
 use ssb_ref::LinkRef;
@@ -80,13 +80,14 @@ pub async fn insert_abouts(
                     .fetch_optional(&mut *connection)
                     .await?;
 
-            if let Some((id, feed_seq, db_content)) = row {
+            if let Some((id, feed_seq, mut db_content)) = row {
                 if feed_seq < msg.value.sequence as i64 {
-                    for (key, value) in db_content.as_object().unwrap().iter() {
-                        json_content.insert(key.clone(), value.clone());
+                    let db_object = db_content.as_object_mut().unwrap();
+                    for (key, value) in json_content.iter() {
+                        db_object.insert(key.clone(), value.clone());
                     }
                     query("UPDATE about_feeds SET content = ? WHERE id = ?")
-                        .bind(Value::Object(json_content))
+                        .bind(db_content)
                         .bind(id)
                         .execute(connection)
                         .await?;
@@ -113,21 +114,28 @@ pub async fn insert_abouts(
         LinkRef::Msg(msg_ref) => {
             let link_to_msg_ref_id = find_or_create_msg_ref(connection, msg_ref).await?;
 
-            let row: Option<(i64, i64, Value)> =
-                query("SELECT id, feed_seq, content FROM about_msgs WHERE link_from_feed_ref_id = ? AND link_to_msg_ref_id = ?")
-                    .bind(&link_from_feed_ref_id)
-                    .bind(&link_to_msg_ref_id)
-                    .map(|row: sqlx::sqlite::SqliteRow| (row.get(0), row.get(1), row.get(2)))
-                    .fetch_optional(&mut *connection)
-                    .await?;
+            let row: Option<(i64, i64, Value)> = query(
+                "
+                SELECT id, feed_seq, content
+                FROM about_msgs
+                WHERE link_from_feed_ref_id = ?
+                AND link_to_msg_ref_id = ?
+                ",
+            )
+            .bind(&link_from_feed_ref_id)
+            .bind(&link_to_msg_ref_id)
+            .map(|row: sqlx::sqlite::SqliteRow| (row.get(0), row.get(1), row.get(2)))
+            .fetch_optional(&mut *connection)
+            .await?;
 
-            if let Some((id, feed_seq, db_content)) = row {
+            if let Some((id, feed_seq, mut db_content)) = row {
                 if feed_seq < msg.value.sequence as i64 {
-                    for (key, value) in db_content.as_object().unwrap().iter() {
-                        json_content.insert(key.clone(), value.clone());
+                    let db_object = db_content.as_object_mut().unwrap();
+                    for (key, value) in json_content.iter() {
+                        db_object.insert(key.clone(), value.clone());
                     }
                     query("UPDATE about_feeds SET content = ? WHERE id = ?")
-                        .bind(Value::Object(json_content))
+                        .bind(db_content)
                         .bind(id)
                         .execute(connection)
                         .await?;
