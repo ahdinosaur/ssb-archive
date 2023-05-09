@@ -13,3 +13,5 @@ ssb-markdown = { path = "../ssb-markdown" }
 tokio = { version = "1.28.0", features = ["rt", "macros"] }
 serde_json = "1.0.96"
 thiserror = "1.0.40"
+progress_bar = "1.0.3"
+simple-home-dir = "0.1.2"

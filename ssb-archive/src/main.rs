@@ -1,5 +1,9 @@
 // use std::{thread::sleep, time::Duration};
 
+use std::{env::current_dir, io, path::Path};
+
+use progress_bar;
+use simple_home_dir::home_dir as get_home_dir;
 use ssb_db::{Database, Error as DatabaseError, SelectAllMsgsByFeedOptions};
 use ssb_markdown::render;
 use ssb_ref::{FeedRef, RefError};
@@ -17,6 +21,10 @@ async fn main() {
 
 #[derive(Debug, ThisError)]
 enum Error {
+    #[error("Failed to get home dir")]
+    HomeDir,
+    #[error("Failed to get current dir: {0}")]
+    CurrentDir(#[source] io::Error),
     #[error("Database error: {0}")]
     Database(#[from] DatabaseError),
     #[error("Ref format error: {0}")]
@@ -24,23 +32,23 @@ enum Error {
 }
 
 async fn exec() -> Result<(), Error> {
-    let mut db = Database::new(
-        "/home/dinosaur/.ssb/flume/log.offset".into(),
-        "/home/dinosaur/repos/ahdinosaur/ssb-archive/db.sqlite3".into(),
-        Vec::new(),
-    )
-    .await?;
+    let cwd = current_dir().map_err(Error::CurrentDir)?;
+    let home_dir = get_home_dir().ok_or(Error::HomeDir)?;
+    let log_path = home_dir.join(Path::new(".ssb/flume/log.offset"));
+    let sql_path = cwd.join(Path::new("db.sqlite3"));
 
+    let mut db = Database::new(log_path, sql_path, Vec::new()).await?;
+
+    let log_latest = db.get_log_latest().await.unwrap_or(0);
+    progress_bar::init_progress_bar(log_latest as usize);
     loop {
-        let log_latest = db.get_log_latest().await;
-        let sql_latest = db.get_sql_latest().await?;
-        if let (Some(log_offset), Some(sql_offset)) = (log_latest, sql_latest) {
-            if log_offset == sql_offset {
+        if let Some(sql_latest) = db.get_sql_latest().await? {
+            progress_bar::set_progress_bar_progression(sql_latest as usize);
+            if log_latest == sql_latest {
+                progress_bar::finalize_progress_bar();
                 break;
             }
         }
-        println!("log latest: {:?}", log_latest);
-        println!("sql latest: {:?}", sql_latest);
         db.process(20_000).await?;
         // sleep(Duration::from_secs(1))
     }

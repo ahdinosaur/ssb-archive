@@ -1374,6 +1374,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "progress_bar"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c8e8843722ce55deb442e7d6476a97c081b8485ea2807b031d160f592f99037"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "pulldown-cmark"
 version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1691,6 +1700,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74233d3b3b2f6d4b006dc19dee745e73e2a6bfb6f93607cd3b02bd5b00797d7c"
 
 [[package]]
+name = "simple-home-dir"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8cad354eef35a6c6020953afda6d4391d9fd41d6234d7bcd2f1d7c9f6f8105d"
+dependencies = [
+ "windows-sys 0.48.0",
+]
+
+[[package]]
 name = "siphasher"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1832,7 +1850,9 @@ dependencies = [
 name = "ssb-archive"
 version = "0.1.0"
 dependencies = [
+ "progress_bar",
  "serde_json",
+ "simple-home-dir",
  "ssb-db",
  "ssb-markdown",
  "ssb-msg",

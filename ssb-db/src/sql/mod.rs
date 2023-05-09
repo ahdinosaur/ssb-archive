@@ -8,7 +8,7 @@ use sqlx::{
     ConnectOptions, Error as SqlError, Row,
 };
 use ssb_msg::{BlobLink, Link, Msg, MsgContent};
-use std::str::FromStr;
+use std::path::Path;
 
 mod abouts;
 mod blob_links;
@@ -43,8 +43,9 @@ pub use self::queries::SelectAllMsgsByFeedOptions;
 pub(crate) use self::queries::*;
 use self::votes::*;
 
-pub async fn create_connection(path: &str) -> Result<SqliteConnection, SqlError> {
-    SqliteConnectOptions::from_str(path)?
+pub async fn create_connection<P: AsRef<Path>>(path: P) -> Result<SqliteConnection, SqlError> {
+    SqliteConnectOptions::new()
+        .filename(path)
         .journal_mode(SqliteJournalMode::Wal)
         .create_if_missing(true)
         .connect()

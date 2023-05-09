@@ -8,6 +8,7 @@ use serde_json::{from_value, Error as JsonError, Value};
 use sqlx::{Connection, SqliteConnection};
 use ssb_msg::{Msg, MsgContent};
 use ssb_ref::{FeedRef, MsgRef};
+use std::path::Path;
 use std::{fs::OpenOptions, io};
 use thiserror::Error as ThisError;
 
@@ -40,11 +41,15 @@ pub enum Error {
 }
 
 impl Database {
-    pub async fn new(
-        log_path: String,
-        sql_path: String,
+    pub async fn new<LogPath, SqlPath>(
+        log_path: LogPath,
+        sql_path: SqlPath,
         keys: Vec<Keypair>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Error>
+    where
+        LogPath: AsRef<Path>,
+        SqlPath: AsRef<Path>,
+    {
         let log_file = OpenOptions::new()
             .read(true)
             .write(false)
@@ -121,7 +126,6 @@ impl Database {
         let log_seqs = select_all_msg_log_seqs_by_feed(&mut self.sql, options).await?;
         let mut msgs: Vec<Msg<Value>> = Vec::new();
         for log_seq in log_seqs {
-            println!("log_seq: {}", log_seq);
             let bytes = self.log.get(log_seq).map_err(Error::LogGet)?;
             let msg: Msg<Value> = serde_json::from_slice(bytes.as_slice())?;
             msgs.push(msg)
